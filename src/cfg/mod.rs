@@ -261,8 +261,8 @@ impl Cfg {
         format!("%start {}\n\n%%\n\n{}\n\n%%", s_rule.lhs, s)
     }
 
-    pub(crate) fn terminals_only_alts(&self) -> Vec<(String, &RuleAlt)> {
-        let mut terms_only_alts = Vec::<(String, &RuleAlt)>::new();
+    pub(crate) fn terminals_only_alts(&self) -> Vec<(&str, &RuleAlt)> {
+        let mut alts = Vec::<(&str, &RuleAlt)>::new();
         for rule in &self.rules {
             for alt in &rule.rhs {
                 let mut has_non_term = false;
@@ -273,10 +273,37 @@ impl Cfg {
                     }
                 }
                 if !has_non_term {
-                    terms_only_alts.push((rule.lhs.to_owned(), alt));
+                    alts.push((rule.lhs.as_str(), alt));
                 }
             }
         }
-        terms_only_alts
+        alts
+    }
+
+    /// Returns alternatives which start with terminals and has a non-terminal
+    pub(crate) fn alt_start_with_terminals(&self) -> Vec<(&str, &RuleAlt, i8)> {
+        let mut alts = Vec::<(&str, &RuleAlt, i8)>::new();
+        for rule in &self.rules {
+            for alt in &rule.rhs {
+                if let Some(LexSymbol::Term(_)) = alt.lex_symbols.first() {
+                    let mut has_non_term = false;
+                    let mut nt_i: i8 = -1;
+                    if let Some(more_syms) = alt.lex_symbols.get(1..) {
+                        for (i, sym) in more_syms.iter().enumerate() {
+                            if let LexSymbol::NonTerm(nt) = sym {
+                                has_non_term = true;
+                                nt_i = (i + 1) as i8;
+                                break
+                            }
+                        }
+                    }
+                    if has_non_term {
+                        alts.push((rule.lhs.as_str(), alt, nt_i));
+                    }
+                }
+            }
+        }
+
+        alts
     }
 }
