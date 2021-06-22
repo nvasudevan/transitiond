@@ -1,12 +1,15 @@
 mod diagram;
 
 use std::fmt;
-use crate::cfg::diagram::{CfgGraph, Vertex};
+use crate::cfg::diagram::{CfgGraph, Node};
+
+const EPSILON: &str = "<eps>";
 
 #[derive(Debug, Copy, Clone, PartialEq)]
 pub(crate) enum SymType {
     NonTerminal,
     Terminal,
+    Epsilon
 }
 
 #[derive(Debug, Clone)]
@@ -71,10 +74,42 @@ impl PartialEq for TermSymbol {
     }
 }
 
+#[derive(Debug, Clone)]
+pub(crate) struct EpsilonSymbol {
+    tok: String,
+    tok_type: SymType,
+}
+
+impl fmt::Display for EpsilonSymbol {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "'{}'", &self.tok)
+    }
+}
+
+impl EpsilonSymbol {
+    pub(crate) fn new(tok: String) -> Self {
+        Self {
+            tok,
+            tok_type: SymType::Epsilon,
+        }
+    }
+}
+
+impl PartialEq for EpsilonSymbol {
+    fn eq(&self, other: &Self) -> bool {
+        if self.tok_type.eq(&other.tok_type) && self.tok.eq(&other.tok) {
+            return true;
+        }
+
+        false
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) enum LexSymbol {
     NonTerm(NonTermSymbol),
     Term(TermSymbol),
+    Epsilon(EpsilonSymbol)
 }
 
 impl fmt::Display for LexSymbol {
@@ -85,6 +120,9 @@ impl fmt::Display for LexSymbol {
             }
             LexSymbol::Term(term) => {
                 term.fmt(f)
+            }
+            LexSymbol::Epsilon(eps) => {
+                eps.fmt(f)
             }
         }
     }
@@ -241,91 +279,4 @@ impl Cfg {
         }
         terms_only_alts
     }
-}
-
-// impl Into<CfgGraph> for Cfg {
-//     fn into(self) -> CfgGraph {
-//         let mut graph = CfgGraph::new();
-//         let terms_only_rules = self.terminals_only_alts();
-//         let mut vertices: Vec<Vertex> = self.rules
-//             .iter()
-//             .map(|r| Vertex::new(format!("u_{}", r.lhs)))
-//             .collect();
-//
-//         let mut v_vertices: Vec<Vertex> = self.rules
-//             .iter()
-//             .map(|r| Vertex::new(format!("v_{}", r.lhs)))
-//             .collect();
-//
-//         vertices.append(&mut v_vertices);
-//         graph.set_vertices(vertices);
-//
-//         graph
-//     }
-// }
-
-#[cfg(test)]
-mod tests {
-    use super::{LexSymbol, NonTermSymbol, TermSymbol};
-    use super::RuleAlt;
-    use crate::cfg::{CfgRule, Cfg};
-    use crate::cfg::diagram::{CfgGraph, Edge};
-
-    fn simple_cfg() -> Cfg {
-        let mut rules: Vec<CfgRule> = vec![];
-
-        // S: F B 'x' | G B 'y'
-        let s_lhs = "S".to_string();
-        let mut alt1_syms = Vec::<LexSymbol>::new();
-        alt1_syms.push(LexSymbol::NonTerm(NonTermSymbol::new("F".to_string())));
-        alt1_syms.push(LexSymbol::NonTerm(NonTermSymbol::new("B".to_string())));
-        alt1_syms.push(LexSymbol::Term(TermSymbol::new("x".to_string())));
-        let s_alt1 = RuleAlt::new(alt1_syms);
-
-        let mut alt2_syms = Vec::<LexSymbol>::new();
-        alt2_syms.push(LexSymbol::NonTerm(NonTermSymbol::new("G".to_string())));
-        alt2_syms.push(LexSymbol::NonTerm(NonTermSymbol::new("B".to_string())));
-        alt2_syms.push(LexSymbol::Term(TermSymbol::new("y".to_string())));
-        let s_alt2 = RuleAlt::new(alt2_syms);
-
-        let s_rhs = vec![s_alt1, s_alt2];
-        rules.push(CfgRule::new(s_lhs, s_rhs));
-
-        // F: 'a'
-        let mut f_alt_syms = Vec::<LexSymbol>::new();
-        f_alt_syms.push(LexSymbol::Term(TermSymbol::new("a".to_string())));
-        let f_alt1 = RuleAlt::new(f_alt_syms);
-        rules.push(CfgRule::new("F".to_string(), vec![f_alt1]));
-
-        // G: 'a'
-        let mut g_alt_syms = Vec::<LexSymbol>::new();
-        g_alt_syms.push(LexSymbol::Term(TermSymbol::new("a".to_string())));
-        let g_alt1 = RuleAlt::new(g_alt_syms);
-        rules.push(CfgRule::new("G".to_string(), vec![g_alt1]));
-
-        // B: 'b' 'b'
-        let mut b_alt_syms = Vec::<LexSymbol>::new();
-        b_alt_syms.push(LexSymbol::Term(TermSymbol::new("b".to_string())));
-        b_alt_syms.push(LexSymbol::Term(TermSymbol::new("b".to_string())));
-        let b_alt1 = RuleAlt::new(b_alt_syms);
-        rules.push(CfgRule::new("B".to_string(), vec![b_alt1]));
-
-        Cfg::new(rules)
-    }
-
-    #[test]
-    fn test_cfg() {
-        let cfg = simple_cfg();
-
-        let mut graph = CfgGraph::from(cfg);
-        for v in graph.vertices() {
-            println!("v: {:?}", v);
-        }
-
-        for e in graph.edges() {
-            println!("e: {:?}", e);
-        }
-
-    }
-
 }

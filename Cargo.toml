@@ -1,5 +1,5 @@
 [package]
-name = "TransitionD"
+name = "transitiond"
 version = "0.1.0"
 authors = ["Naveneetha Vasudevan <naveneetha@yahoo.com>"]
 edition = "2018"
