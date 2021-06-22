@@ -1,7 +1,6 @@
 mod diagram;
 
 use std::fmt;
-use crate::cfg::diagram::{CfgGraph, Node};
 
 const EPSILON: &str = "<eps>";
 
@@ -163,10 +162,6 @@ impl RuleAlt {
             lex_symbols
         }
     }
-
-    pub(crate) fn as_lrpar(&self) -> String {
-        format!("{} {{ }}", self)
-    }
 }
 
 #[derive(Debug)]
@@ -197,15 +192,6 @@ impl CfgRule {
             rhs,
         }
     }
-
-    pub(crate) fn as_lrpar(&self) -> String {
-        let alts_s: Vec<String> = self.rhs.iter().
-            map(|alt| alt.as_lrpar())
-            .collect();
-        let rhs_s = alts_s.join(" | ");
-
-        format!("{} ->: {}", self.lhs, rhs_s)
-    }
 }
 
 #[derive(Debug)]
@@ -232,33 +218,6 @@ impl Cfg {
         Self {
             rules
         }
-    }
-
-    pub(crate) fn start_rule(&self) -> Option<&CfgRule> {
-        self.rules.first()
-    }
-
-    pub(crate) fn as_hyacc(&self) -> String {
-        let s_rule = self.start_rule()
-            .expect("Cfg is missing a start rule!");
-
-        format!("%start {}\n\n%%\n\n{}\n\n%%", s_rule.lhs, self)
-    }
-
-    pub(crate) fn as_yacc(&self) -> String {
-        format!("%define lr.type canonical-lr\n\n{}", self.as_hyacc())
-    }
-
-    pub(crate) fn as_lrpar(&self) -> String {
-        let s_rule = self.start_rule()
-            .expect("Cfg is missing a start rule!");
-
-        let mut s = String::new();
-        for rule in &self.rules {
-            s = format!("{}{}\n;\n", s, rule.as_lrpar());
-        }
-
-        format!("%start {}\n\n%%\n\n{}\n\n%%", s_rule.lhs, s)
     }
 
     pub(crate) fn terminals_only_alts(&self) -> Vec<(&str, &RuleAlt)> {
@@ -290,7 +249,7 @@ impl Cfg {
                     let mut nt_i: i8 = -1;
                     if let Some(more_syms) = alt.lex_symbols.get(1..) {
                         for (i, sym) in more_syms.iter().enumerate() {
-                            if let LexSymbol::NonTerm(nt) = sym {
+                            if let LexSymbol::NonTerm(_) = sym {
                                 has_non_term = true;
                                 nt_i = (i + 1) as i8;
                                 break

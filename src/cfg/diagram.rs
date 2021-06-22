@@ -3,8 +3,7 @@ use std::{
     rc::Rc,
 };
 
-use crate::cfg::{Cfg, CfgRule, EpsilonSymbol, LexSymbol, RuleAlt, TermSymbol, EPSILON};
-use std::fmt::Formatter;
+use crate::cfg::{Cfg, EpsilonSymbol, LexSymbol, EPSILON};
 
 /// Represents a Cfg graph node/vertex
 #[derive(Debug, Clone)]
@@ -162,6 +161,7 @@ impl CfgGraph {
 
             // use the non-terminal as the destination
             let nt_node = to_be_derived.first()?;
+            let end_label = format!("v_{}", nt_node.to_string());
             println!("end label: {}", end_label);
             let end_v = self.find_vertex_by_label(&end_label.to_string())?;
             edges.push(
@@ -194,7 +194,7 @@ impl CfgGraph {
 mod tests {
     use crate::cfg::{LexSymbol, NonTermSymbol, TermSymbol};
     use crate::cfg::{Cfg, CfgRule, RuleAlt};
-    use crate::cfg::diagram::{CfgGraph, Edge};
+    use crate::cfg::diagram::CfgGraph;
 
     fn simple_cfg() -> Cfg {
         let mut rules: Vec<CfgRule> = vec![];
