@@ -143,13 +143,13 @@ impl CfgGraph {
                 )
             );
         }
-
         self.edges.append(&mut edges);
 
         Some(())
     }
 
-    /// build edges from alternatives of form `A: 'x' B ...`
+    /// build edges from alternatives that begin with a terminal:
+    ///  - `A: 'x' B`, edge: `u_A -> u_B <('x'), (B)>`
     fn build_start_terminal_edges(&mut self) -> Option<()> {
         let alts = self.cfg.alt_start_with_terminals();
         let mut edges = Vec::<Edge>::new();
@@ -159,10 +159,9 @@ impl CfgGraph {
             let start_label = format!("u_{}", lhs);
             let start_v = self.find_vertex_by_label(&start_label)?;
 
-            // use the non-terminal as the destination
+            // use the first non-terminal from to_be_derived as the destination
             let nt_node = to_be_derived.first()?;
             let end_label = format!("v_{}", nt_node.to_string());
-            println!("end label: {}", end_label);
             let end_v = self.find_vertex_by_label(&end_label.to_string())?;
             edges.push(
                 Edge::new(
@@ -172,11 +171,40 @@ impl CfgGraph {
                     to_be_derived.to_vec(),
                 )
             );
-
         }
-
         self.edges.append(&mut edges);
 
+        Some(())
+    }
+
+    /// build edges from alternatives that begin with a non-terminal:
+    /// - `A: C 'x'`, edge: `u_A -> u_C <('<eps>'), (C, 'x'))`
+    fn build_start_non_terminal_edges(&mut self) -> Option<()> {
+        let alts = self.cfg.alt_start_with_non_terminals();
+        let mut edges = Vec::<Edge>::new();
+        for (lhs, alt) in alts {
+            let start_label = format!("u_{}", lhs);
+            let start_v = self.find_vertex_by_label(&start_label)?;
+
+            // use the first non-terminal of the alt as the destination
+            let nt_node = alt.lex_symbols.first()?;
+            let end_label = format!("u_{}", nt_node.to_string());
+            let end_v = self.find_vertex_by_label(&end_label.to_string())?;
+
+            let derived: Vec<LexSymbol> = vec![
+                LexSymbol::Epsilon(EpsilonSymbol::new(EPSILON.to_owned()))
+            ];
+            let to_be_derived = &alt.lex_symbols;
+            edges.push(
+                Edge::new(
+                    Rc::clone(&start_v),
+                    Rc::clone(&end_v),
+                    derived,
+                    to_be_derived.clone(),
+                )
+            );
+        }
+        self.edges.append(&mut edges);
         Some(())
     }
 
@@ -184,7 +212,8 @@ impl CfgGraph {
     /// 1. build the terminal only edges (e.g. A: 'a')
     pub(crate) fn build_edges(&mut self) -> Option<()> {
         self.build_terminal_only_edges()?;
-        self.build_start_terminal_edges();
+        self.build_start_terminal_edges()?;
+        self.build_start_non_terminal_edges()?;
 
         Some(())
     }
@@ -243,6 +272,7 @@ mod tests {
     #[test]
     fn test_cfg() {
         let cfg = simple_cfg();
+        println!("cfg:\n{}", cfg);
 
         let mut graph = CfgGraph::new(cfg);
         for v in graph.vertices() {

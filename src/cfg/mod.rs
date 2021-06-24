@@ -1,6 +1,8 @@
 mod diagram;
+mod parse;
 
 use std::fmt;
+use std::path::Path;
 
 const EPSILON: &str = "<eps>";
 
@@ -263,6 +265,19 @@ impl Cfg {
             }
         }
 
+        alts
+    }
+
+    pub(crate) fn alt_start_with_non_terminals(&self) -> Vec<(&str, &RuleAlt)> {
+        let mut alts = Vec::<(&str, &RuleAlt)>::new();
+        for rule in &self.rules {
+            for alt in &rule.rhs {
+                if let Some(LexSymbol::NonTerm(_)) = alt.lex_symbols.first() {
+                    alts.push((rule.lhs.as_str(), alt));
+                    break
+                }
+            }
+        }
         alts
     }
 }
