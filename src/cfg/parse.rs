@@ -1,11 +1,39 @@
 use std::{fs, io};
-use regex;
-use std::str::Chars;
 use regex::Regex;
+use lazy_static::lazy_static;
+use crate::cfg::{TermSymbol, LexSymbol, NonTermSymbol, EpsilonSymbol};
+
+#[derive(Debug)]
+pub(crate) struct RultAltStr {
+    alt: Vec<LexSymbol>
+}
+
+impl RultAltStr {
+    pub(crate) fn new(alt: Vec<LexSymbol>) -> Self {
+        Self {
+            alt
+        }
+    }
+}
+
+#[derive(Debug)]
+pub(crate) struct CfgRuleStr {
+    pub(crate) lhs: String,
+    pub(crate) rhs: Vec<RultAltStr>
+}
+
+impl CfgRuleStr {
+    pub(crate) fn new(lhs: String, rhs: Vec<RultAltStr>) -> Self {
+       Self {
+           lhs,
+           rhs
+       }
+    }
+}
 
 pub(crate) struct CfgParser {
     start_symbol: String,
-    rules: Vec<String>,
+    rules: Vec<CfgRuleStr>,
 }
 
 impl CfgParser {
@@ -20,7 +48,7 @@ impl CfgParser {
         self.start_symbol = start_symbol;
     }
 
-    fn add_rule(&mut self, rule: String) {
+    fn add_rule(&mut self, rule: CfgRuleStr) {
         self.rules.push(rule);
     }
 }
@@ -39,12 +67,6 @@ fn ws(s_chars: &[char], i: usize) -> Option<usize> {
 
     Some(j)
 }
-
-// fn tok(s_char: &[char]) -> String {
-//     let re = Regex::new(r"[[:alpha:]]")
-//         .expect("Unable to create regex");
-//
-// }
 
 /// Retrieve the next token. Read until the next character is not ASCII.
 fn next_token(s_chars: &[char], i: usize) -> Option<(String, usize)> {
@@ -114,7 +136,7 @@ fn rules_marker_directive(s_chars: &[char], i: usize) -> Option<usize> {
 /// - %define - marks the definition part
 /// - %start - marks the start rule part
 /// - %% - has two of these, marks the begin and end of rules section.
-fn parse_header_directives(s_chars: &[char], i: usize, mut cfg_parser: &mut CfgParser) -> Option<usize> {
+fn parse_header_directives(s_chars: &[char], i: usize, cfg_parser: &mut CfgParser) -> Option<usize> {
     let mut j = i;
     if let Some(z) = parse_define_directive(s_chars, i) {
         j = z;
@@ -133,6 +155,7 @@ fn parse_header_directives(s_chars: &[char], i: usize, mut cfg_parser: &mut CfgP
     Some(i)
 }
 
+/// Parses the footer `%%` section, thus marking the end of parsing
 fn parse_footer_directive(s_chars: &[char], i: usize) -> Option<usize> {
     let j = rules_marker_directive(s_chars, i)?;
     if j > i {
@@ -157,14 +180,113 @@ fn rule_end_marker(s_chars: &[char], i: usize) -> Option<usize> {
     Some(i)
 }
 
+fn rule_regex(s: &str) -> Option<(&str, &str)> {
+    // let re = Regex::new(r"(?m)(^[a-zA-Z]+):([a-zA-Z'|\s]+)(;$)")
+    //     .expect("Unable to create regex");(?P<end>[\n\r\s]*;[\n\r\s]*)
+    lazy_static! {
+     static ref RE_RULE: Regex = Regex::new(r"(?P<lhs>[a-zA-Z]+)[\s]*:(?P<rhs>[a-zA-z'|\s]+)[\s]*;")
+        .expect("Unable to create regex");
+    }
+    let cap = RE_RULE.captures(s)?;
+    // println!("cap: {:?}", cap);
+    let lhs = cap.name("lhs")?.as_str();
+    let rhs = cap.name("rhs")?.as_str();
+
+    Some((lhs, rhs))
+}
+
+/// S: A 'b' C | 'x' | ;
+fn rule_rhs_regex(s: &str) -> Option<Vec<RultAltStr>> {
+    lazy_static! {
+     static ref RE_ALT: Regex = Regex::new(r"(?P<alt>[a-zA-z'\s]+)")
+        .expect("Unable to create regex for parsing rule alternatives");
+     static ref RE_EMPTY_ALT: Regex = Regex::new(r"(?P<empty>\s*)")
+        .expect("Unable to create regex to parse an empty alternative");
+    }
+
+    let alts: Vec<&str> = s.split('|').collect();
+    let mut alts_s: Vec<RultAltStr> = vec![];
+    for alt in alts {
+        let alt_trimmed = alt.trim();
+        match RE_ALT.captures(alt_trimmed) {
+            Some(cap) => {
+                let alt_s = cap.name("alt")?.as_str();
+                let alts_syms = parse_alt(alt_s)?;
+                alts_s.push(RultAltStr::new(alts_syms));
+            },
+            _ => {
+                // try empty alt
+                let empty_alt_cap = RE_EMPTY_ALT.captures(alt)?;
+                let alt_s = empty_alt_cap.name("empty")?.as_str();
+                let alt_syms: Vec<LexSymbol> = vec![LexSymbol::Epsilon(EpsilonSymbol::new("".to_owned()))];
+                alts_s.push(RultAltStr::new(alt_syms));
+            }
+        }
+    }
+
+    Some(alts_s)
+}
+
+fn term_token_regex(s: &str) -> Option<TermSymbol> {
+    lazy_static! {
+     static ref RE_TERMINAL: Regex = Regex::new(r"(?P<tok>'[a-zA-z]+')")
+        .expect("Unable to create regex for parsing a terminal token");
+    }
+
+    let cap = RE_TERMINAL.captures(s)?;
+    let tok = cap.name("tok")?.as_str();
+
+    Some(TermSymbol::new(tok.to_owned()))
+}
+
+fn non_term_token_regex(s: &str) -> Option<NonTermSymbol> {
+    lazy_static! {
+     static ref RE_NON_TERMINAL: Regex = Regex::new(r"(?P<tok>[a-zA-z]+)")
+        .expect("Unable to create regex to parse a non-terminal token");
+    }
+
+    let cap = RE_NON_TERMINAL.captures(s)?;
+    let tok = cap.name("tok")?.as_str();
+
+    Some(NonTermSymbol::new(tok.to_owned()))
+}
+
+fn parse_lex_symbols(s: &str) -> Option<LexSymbol> {
+    if let Some(sym) = term_token_regex(s) {
+        return Some(LexSymbol::Term(sym));
+    }
+
+    if let Some(sym) = non_term_token_regex(s) {
+        return Some(LexSymbol::NonTerm(sym));
+    }
+
+   None
+}
+
+fn parse_alt(s: &str) -> Option<Vec<LexSymbol>> {
+    let tokens_s: Vec<&str> = s.split_ascii_whitespace().collect();
+    let mut syms: Vec<LexSymbol> = vec![];
+    for tok in tokens_s {
+        let sym = parse_lex_symbols(tok)?;
+        syms.push(sym);
+    }
+
+    Some(syms)
+}
+
 /// Create a rule
+/// From `i`, tries the rule end marker `;`, if found, returns the rule.
+/// Otherwise, returns `i`.
 fn rule(s_chars: &[char], i: usize, cfg_parser: &mut CfgParser) -> Option<usize> {
     let mut j = rule_end_marker(s_chars, i)?;
     if j > i {
         let rule = s_chars.get(i..j+1)?;
         let rule_s: String = rule.iter().collect();
-        println!("rule: {}", rule_s);
-        cfg_parser.rules.push(rule_s);
+        let (lhs, rhs) = rule_regex(&rule_s)
+            .expect("Unable to parse lhs, rhs of rule");
+        let alts = rule_rhs_regex(rhs).unwrap();
+        let cfg_rule = CfgRuleStr::new(lhs.to_owned(), alts);
+        cfg_parser.rules.push(cfg_rule);
         return Some(j);
     }
 
@@ -175,19 +297,20 @@ fn root_rule(s_chars: &[char], i: usize, mut cfg_parser: &mut CfgParser) -> Opti
     rule(s_chars, i, &mut cfg_parser)
 }
 
+/// Parses the rules section between the `%%` markers
+/// First read the root rule and then parse the rest of the rules
 fn parse_rules(s_chars: &[char], i: usize, mut cfg_parser: &mut CfgParser) -> Option<usize> {
-    println!("=> parsing rules section...");
+    println!("=> parsing rules");
     let mut j = ws(s_chars, i)?;
-    // first rule has to be the root rule
+    // read root rule
     j = root_rule(s_chars, j, &mut cfg_parser)?;
     j += 1;
     while j < s_chars.len() {
-        println!("j: {}", j);
         j = rule(s_chars, j, &mut cfg_parser)?;
         j += 1;
         let c = s_chars.get(j)?;
+        // at the end of rule section
         if *c == '%' {
-            // at the end of rule section
            break
         }
     }
@@ -198,7 +321,6 @@ fn parse_rules(s_chars: &[char], i: usize, mut cfg_parser: &mut CfgParser) -> Op
 fn read_file(cfgp: &str) -> io::Result<CfgParser> {
     let s = fs::read_to_string(cfgp)?;
     let mut s_chars: Vec<char> = s.chars().into_iter().collect();
-    println!("[{}] s_chars: {:?}", s_chars.len(), s_chars);
     let mut cfg_parser = CfgParser::new();
     let mut i = ws(s_chars.as_slice(), 0)
         .expect("Unable to get first non-ws");
@@ -206,7 +328,7 @@ fn read_file(cfgp: &str) -> io::Result<CfgParser> {
         .expect("Unable to parse the header directives!");
     i = parse_rules(s_chars.as_slice(), i, &mut cfg_parser)
         .expect("Parsing of grammar rules failed!");
-    i = parse_footer_directive(s_chars.as_slice(), i)
+    parse_footer_directive(s_chars.as_slice(), i)
         .expect("Unable to parse footer directive");
 
     Ok(cfg_parser)
@@ -215,10 +337,21 @@ fn read_file(cfgp: &str) -> io::Result<CfgParser> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use regex::Regex;
 
     #[test]
     fn test_cfg() {
         let cfg_parser = read_file("./grammars/test.y").expect("xxx");
         println!("rules: \n{:?}", cfg_parser.rules);
+    }
+
+    #[test]
+    fn test_regex() {
+        let s = "root: BGH_C | ;";
+        let re = Regex::new(r"(?P<lhs>[a-zA-Z]+):(?P<rhs>[a-zA-z'|\s]+)[\s]*;")
+            .expect("Unable to create regex");
+        let cap = re.captures(s)
+            .expect("Unable to create capture");
+        println!("cap: {:?}", cap);
     }
 }

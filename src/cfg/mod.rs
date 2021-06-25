@@ -2,7 +2,6 @@ mod diagram;
 mod parse;
 
 use std::fmt;
-use std::path::Path;
 
 const EPSILON: &str = "<eps>";
 
