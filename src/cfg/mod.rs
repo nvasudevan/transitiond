@@ -82,7 +82,7 @@ pub(crate) struct EpsilonSymbol {
 
 impl fmt::Display for EpsilonSymbol {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "'{}'", &self.tok)
+        write!(f, "{}", &self.tok)
     }
 }
 
