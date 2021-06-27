@@ -22,22 +22,6 @@ impl CfgParser {
         self.start_symbol = start_symbol;
     }
 
-    /// skip the whitespace (' ', \n) and move the counter to the next non-ws.
-    fn ws(&self, i: usize) -> Option<usize> {
-        let s_chars = self.tokens.as_slice();
-        let mut j = i;
-        while j < s_chars.len() {
-            let c = s_chars.get(j)?;
-            if !c.is_ascii_whitespace() {
-                // we have a non-ws character
-                return Some(j);
-            }
-            j += 1;
-        }
-
-        Some(j)
-    }
-
     // TOKENS
 
     fn term_token_regex(&self, s: &str) -> Option<TermSymbol> {
@@ -76,108 +60,58 @@ impl CfgParser {
         None
     }
 
-    /// Retrieve the next token. Read until the next character is not ASCII.
-    /// TO DO: used only my start_directive!
-    fn next_token(&self, i: usize) -> Option<(String, usize)> {
-        let s_chars = self.tokens.as_slice();
-        let j = self.ws(i)?; // j points to the non-ws
-        let mut z = j;
-        while z < s_chars.len() {
-            let c = s_chars.get(z)?;
-            if !c.is_ascii_alphabetic() {
-                break;
-            }
-            z += 1;
-        }
-
-        let tok_chars = s_chars.get(j..z+1)?;
-        let tok: String = tok_chars.iter().collect();
-
-        Some((tok, z))
-    }
-
-    // HEADERS
-
-    /// skip past %define directive, read until we encounter the next % sign
-    /// otherwise, return the given index `i`.
-    fn parse_define_directive(&self, i: usize) -> Option<usize> {
-        let s_chars = self.tokens.as_slice();
-        let peep = s_chars.get(i..i + 7)?;
-        let peep_s: String = peep.iter().collect();
-        if peep_s.eq("%define") {
-            let mut j = i + 7;
-            while j < s_chars.len() {
-                let c = s_chars.get(j)?;
-                if *c == '%' {
-                    return Some(j);
-                }
-                j += 1;
-            }
-        }
-        Some(i)
-    }
-
-    // TO DO: to be regex'd
-    fn parse_start_directive(&mut self, i: usize) -> Option<usize> {
-        let s_chars = self.tokens.as_slice();
-        let mut j = i;
-        // %start - look ahead next 5 symbols to check
-        let peep = s_chars.get(j..j + 6)?;
-        let peep_s: String = peep.iter().collect();
-        if peep_s.eq("%start") {
-            j += 6; //%start. root
-            // start at . and read the next token, move the reference to after token
-            let (tok, k) = self.next_token(j)?;
-            j = k;
-            self.add_start_symbol(tok);
-        }
-
-        Some(j)
-    }
-
     /// Parse bison/YACC directives:
     /// - %define - marks the definition part
     /// - %start - marks the start rule part
     /// - %% - has two of these, marks the begin and end of rules section.
-    fn parse_header_directives(&mut self, i: usize) -> Option<usize> {
-        if let Some(mut j) = self.parse_define_directive(i) {
-            if j > i {
-                println!("%define, i:{} -> j:{}", i, j);
-                j = self.parse_start_directive(j)
-                    .expect("Unable to parse %start directive!");
-                println!("%start, j:{}", j);
-                j = self.rules_marker_directive(j)
-                    .expect("Unable to parse %% directive at the end of header!");
-                println!("%% matched, j:{}", j);
-                return Some(j);
-            }
+    fn header_directives(&mut self, i: usize) -> Option<usize> {
+        lazy_static! {
+            static ref RE_HEADER: Regex = Regex::new(
+            r"[\n\r\s]*%[a-zA-Z]+\s+([a-zA-Z\.]+)\s+([a-zA-Z\-]+)[\n\r\s]+%[a-zA-Z]+\s+(?P<start>[a-zA-Z]+)[\n\r\s]+%%"
+            ).expect("Unable to create regex");
         }
-
-        Some(i)
-    }
-
-    /// check for `%%` directive; if so, move the pointer
-    fn rules_marker_directive(&self, i: usize) -> Option<usize> {
         let s_chars = self.tokens.as_slice();
-        let mut j = self.ws(i)?; // j points to the non-ws
-        let peep = s_chars.get(j..j + 2)?;
-        let s: String = peep.iter().collect();
-        if s.eq("%%") {
-            j += 2;
-        }
-
-        Some(j)
-    }
-
-    /// Parses the footer `%%` section, thus marking the end of parsing
-    fn parse_footer_directive(&self, i: usize) -> Option<usize> {
-        let j = self.rules_marker_directive(i)?;
-        if j > i {
-            println!("[END]");
-            return Some(j);
+        let mut j = i;
+        while j < s_chars.len() {
+            let c = s_chars.get(j)?;
+            println!("c: {}", c);
+            if *c == '%' {
+                // is the next char '%' too?
+                let c_next = s_chars.get(j+1)?;
+                if *c_next == '%' {
+                    println!("reached %%");
+                    // j+2 -- so we read until %%
+                    let s: String = s_chars.get(i..j+2)?.iter().collect();
+                    println!("header: {}", s);
+                    let cap = RE_HEADER.captures(&s)?;
+                    println!("header re capture: {:?}", cap);
+                    let start_sym: &str = cap.name("start")?.as_str();
+                    self.add_start_symbol(start_sym.to_owned());
+                    return Some(j+2);
+                }
+            }
+            j += 1;
         }
 
         Some(i)
+    }
+
+    // TO DO: REGEX it
+    /// Parses the footer `%%` section, thus marking the end of parsing
+    fn footer_tag(&self, i: usize) -> Option<bool> {
+        lazy_static! {
+            static ref RE_FOOTER: Regex = Regex::new( r"[\n\r\s]*%%")
+            .expect("Unable to create regex");
+        }
+        let s_chars = self.tokens.as_slice();
+        let peep = s_chars.get(i..)?;
+        let s: String = peep.iter().collect();
+        if let Some(_) = RE_FOOTER.captures(&s) {
+            println!("[END]");
+            return Some(true);
+        }
+
+        Some(false)
     }
 
     // RULES
@@ -245,7 +179,7 @@ impl CfgParser {
         // let re = Regex::new(r"(?m)(^[a-zA-Z]+):([a-zA-Z'|\s]+)(;$)")
         //     .expect("Unable to create regex");(?P<end>[\n\r\s]*;[\n\r\s]*)
         lazy_static! {
-             static ref RE_RULE: Regex = Regex::new(r"(?P<lhs>[a-zA-Z]+)[\s]*:(?P<rhs>[a-zA-z'|\s]+)[\s]*;")
+             static ref RE_RULE: Regex = Regex::new(r"[\n\r\s]+(?P<lhs>[a-zA-Z]+)[\s]*:(?P<rhs>[a-zA-z'|\s]+)[\s]*;")
             .expect("Unable to create regex");
     }
         let cap = RE_RULE.captures(s)?;
@@ -281,7 +215,7 @@ impl CfgParser {
     fn parse_rules(&mut self, i: usize) -> Option<(usize, Vec<CfgRule>)> {
         println!("=> parsing rules");
         let s_chars = self.tokens.as_slice();
-        let mut j = self.ws(i)?;
+        let mut j = i;
         let mut rules: Vec<CfgRule> = vec![];
         // start off with root rule
         let (k, root_rule) = self.rule(j)?;
@@ -293,6 +227,7 @@ impl CfgParser {
             if let Some(cfg_rule) = rule {
                 rules.push(cfg_rule);
             }
+            // TO DO: if no rule found, then directly jump to footer section?
             j = k;
             j += 1;
             let c = s_chars.get(j)?;
@@ -306,10 +241,9 @@ impl CfgParser {
     }
 
     fn parse(&mut self) -> Cfg {
-        let mut i = self.ws(0).expect("Unable to get first non-ws");
-        i = self.parse_header_directives(i).expect("Unable to parse the header directives!");
+        let i = self.header_directives(0).expect("Unable to parse the header directives!");
         let (j, rules) = self.parse_rules(i).expect("Parsing of grammar rules failed!");
-        self.parse_footer_directive(j).expect("Unable to parse footer directive");
+        self.footer_tag(j).expect("Unable to parse footer directive");
 
         Cfg::new(rules)
     }
@@ -331,10 +265,12 @@ mod tests {
     }
 
     #[test]
-    fn test_regex() {
-        let s = "root: BGH_C | ;";
-        let re = Regex::new(r"(?P<lhs>[a-zA-Z]+):(?P<rhs>[a-zA-z'|\s]+)[\s]*;")
-            .expect("Unable to create regex");
+    fn test_header_regex() {
+        let s = "%define lr.type canonical-lr\n%start root\n%%";
+        // let re = Regex::new(r"(?P<lhs>[a-zA-Z]+):(?P<rhs>[a-zA-z'|\s]+)[\s]*;").expect("Unable to create regex");
+        let re = Regex::new(
+            r"%[a-zA-Z]+\s+([a-zA-Z\.]+)\s+([a-zA-Z\-]+)[\n\r\s]+%[a-zA-Z]+\s+(?P<startsym>[a-zA-Z]+)[\n\r\s]+%%"
+        ).expect("Unable to create regex");
         let cap = re.captures(s)
             .expect("Unable to create capture");
         println!("cap: {:?}", cap);
