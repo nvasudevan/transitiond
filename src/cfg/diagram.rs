@@ -3,7 +3,7 @@ use std::{
     rc::Rc,
 };
 
-use crate::cfg::{Cfg, EpsilonSymbol, LexSymbol, EPSILON};
+use crate::cfg::{Cfg, EpsilonSymbol, LexSymbol};
 
 /// Represents a Cfg graph node/vertex
 #[derive(Debug, Clone)]
@@ -132,7 +132,7 @@ impl CfgGraph {
             let end_v = self.find_vertex_by_label(&end_label)?;
             let derived = &alt.lex_symbols;
             let to_be_derived: Vec<LexSymbol> = vec![
-                LexSymbol::Epsilon(EpsilonSymbol::new(EPSILON.to_owned()))
+                LexSymbol::Epsilon(EpsilonSymbol::new())
             ];
             edges.push(
                 Edge::new(
@@ -192,7 +192,7 @@ impl CfgGraph {
             let end_v = self.find_vertex_by_label(&end_label.to_string())?;
 
             let derived: Vec<LexSymbol> = vec![
-                LexSymbol::Epsilon(EpsilonSymbol::new(EPSILON.to_owned()))
+                LexSymbol::Epsilon(EpsilonSymbol::new())
             ];
             let to_be_derived = &alt.lex_symbols;
             edges.push(

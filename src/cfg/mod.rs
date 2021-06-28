@@ -1,15 +1,15 @@
+use std::{fmt, fs};
+
+use crate::cfg::parse::CfgParser;
+
 mod diagram;
 mod parse;
-
-use std::fmt;
-
-const EPSILON: &str = "<eps>";
 
 #[derive(Debug, Copy, Clone, PartialEq)]
 pub(crate) enum SymType {
     NonTerminal,
     Terminal,
-    Epsilon
+    Epsilon,
 }
 
 #[derive(Debug, Clone)]
@@ -76,20 +76,18 @@ impl PartialEq for TermSymbol {
 
 #[derive(Debug, Clone)]
 pub(crate) struct EpsilonSymbol {
-    tok: String,
     tok_type: SymType,
 }
 
 impl fmt::Display for EpsilonSymbol {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{}", &self.tok)
+        write!(f, "{}", "")
     }
 }
 
 impl EpsilonSymbol {
-    pub(crate) fn new(tok: String) -> Self {
+    pub(crate) fn new() -> Self {
         Self {
-            tok,
             tok_type: SymType::Epsilon,
         }
     }
@@ -97,7 +95,7 @@ impl EpsilonSymbol {
 
 impl PartialEq for EpsilonSymbol {
     fn eq(&self, other: &Self) -> bool {
-        if self.tok_type.eq(&other.tok_type) && self.tok.eq(&other.tok) {
+        if self.tok_type.eq(&other.tok_type) {
             return true;
         }
 
@@ -109,7 +107,7 @@ impl PartialEq for EpsilonSymbol {
 pub(crate) enum LexSymbol {
     NonTerm(NonTermSymbol),
     Term(TermSymbol),
-    Epsilon(EpsilonSymbol)
+    Epsilon(EpsilonSymbol),
 }
 
 impl fmt::Display for LexSymbol {
@@ -229,7 +227,7 @@ impl Cfg {
                 for sym in &alt.lex_symbols {
                     if let LexSymbol::NonTerm(_) = sym {
                         has_non_term = true;
-                        break
+                        break;
                     }
                 }
                 if !has_non_term {
@@ -253,7 +251,7 @@ impl Cfg {
                             if let LexSymbol::NonTerm(_) = sym {
                                 has_non_term = true;
                                 nt_i = (i + 1) as i8;
-                                break
+                                break;
                             }
                         }
                     }
@@ -273,10 +271,22 @@ impl Cfg {
             for alt in &rule.rhs {
                 if let Some(LexSymbol::NonTerm(_)) = alt.lex_symbols.first() {
                     alts.push((rule.lhs.as_str(), alt));
-                    break
+                    break;
                 }
             }
         }
         alts
+    }
+}
+
+impl From<&str> for Cfg {
+    fn from(p: &str) -> Self {
+        let s = fs::read_to_string(p)
+            .expect("Unable to read grammar file");
+        let s_chars: Vec<char> = s.chars().into_iter().collect();
+        let mut cfg_parser = CfgParser::new(s_chars);
+        let cfg = cfg_parser.run().expect("Run failed!");
+
+        cfg
     }
 }
