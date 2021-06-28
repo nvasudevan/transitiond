@@ -3,7 +3,8 @@ use std::{
     rc::Rc,
 };
 
-use crate::cfg::{Cfg, EpsilonSymbol, LexSymbol};
+use crate::cfg::{Cfg, EpsilonSymbol, LexSymbol, parse};
+use crate::cfg::parse::CfgParseError;
 
 /// Represents a Cfg graph node/vertex
 #[derive(Debug, Clone)]
@@ -87,7 +88,7 @@ pub(crate) struct CfgGraph {
 }
 
 impl CfgGraph {
-    pub(crate) fn new(cfg: Cfg) -> Self {
+    fn new(cfg: Cfg) -> Self {
         // build start nodes (u_) ones
         let mut nodes: Vec<Rc<Node>> = cfg.rules
             .iter()
@@ -106,10 +107,6 @@ impl CfgGraph {
             nodes,
             edges: vec![],
         }
-    }
-
-    pub(crate) fn vertices(&self) -> &[Rc<Node>] {
-        self.nodes.as_slice()
     }
 
     fn find_vertex_by_label(&self, label: &str) -> Option<&Rc<Node>> {
@@ -210,7 +207,7 @@ impl CfgGraph {
 
     /// Build edges of the graph
     /// 1. build the terminal only edges (e.g. A: 'a')
-    pub(crate) fn build_edges(&mut self) -> Option<()> {
+    fn build_edges(&mut self) -> Option<()> {
         self.build_terminal_only_edges()?;
         self.build_start_terminal_edges()?;
         self.build_start_non_terminal_edges()?;
@@ -219,11 +216,20 @@ impl CfgGraph {
     }
 }
 
+pub(crate) fn graph(cfgp: &str) -> Result<CfgGraph, CfgParseError> {
+    let cfg = parse::parse(cfgp)?;
+    println!("cfg:\n{}", cfg);
+    let mut graph = CfgGraph::new(cfg);
+    graph.build_edges();
+
+    Ok(graph)
+}
+
 #[cfg(test)]
 mod tests {
     use crate::cfg::{LexSymbol, NonTermSymbol, TermSymbol};
     use crate::cfg::{Cfg, CfgRule, RuleAlt};
-    use crate::cfg::diagram::CfgGraph;
+    use crate::cfg::diagram::{CfgGraph, graph};
 
     fn simple_cfg() -> Cfg {
         let mut rules: Vec<CfgRule> = vec![];
@@ -275,12 +281,18 @@ mod tests {
         println!("cfg:\n{}", cfg);
 
         let mut graph = CfgGraph::new(cfg);
-        for v in graph.vertices() {
-            println!("v: {}", v);
-        }
         graph.build_edges();
 
         for e in graph.edges {
+            println!("e: {}", e);
+        }
+    }
+
+    #[test]
+    fn test_cfg_from_file() {
+        let g = graph("./grammars/test.y")
+            .expect("grammar parse failed");
+        for e in g.edges {
             println!("e: {}", e);
         }
     }

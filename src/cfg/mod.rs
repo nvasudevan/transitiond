@@ -1,6 +1,4 @@
-use std::{fmt, fs};
-
-use crate::cfg::parse::CfgParser;
+use std::fmt;
 
 mod diagram;
 mod parse;
@@ -279,14 +277,14 @@ impl Cfg {
     }
 }
 
-impl From<&str> for Cfg {
-    fn from(p: &str) -> Self {
-        let s = fs::read_to_string(p)
-            .expect("Unable to read grammar file");
-        let s_chars: Vec<char> = s.chars().into_iter().collect();
-        let mut cfg_parser = CfgParser::new(s_chars);
-        let cfg = cfg_parser.run().expect("Run failed!");
-
-        cfg
-    }
-}
+// impl From<&str> for Cfg {
+//     fn from(p: &str) -> Self {
+//         let s = fs::read_to_string(p)
+//             .expect("Unable to read grammar file");
+//         let s_chars: Vec<char> = s.chars().into_iter().collect();
+//         let mut cfg_parser = CfgParser::new(s_chars);
+//         let cfg = cfg_parser.run().expect("Run failed!");
+//
+//         cfg
+//     }
+// }

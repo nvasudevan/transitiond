@@ -2,6 +2,7 @@ use lazy_static::lazy_static;
 use regex::Regex;
 
 use crate::cfg::{Cfg, CfgRule, EpsilonSymbol, LexSymbol, NonTermSymbol, RuleAlt, TermSymbol};
+use std::fs;
 
 const RULE_END_MARKER: char = ';';
 
@@ -24,7 +25,7 @@ pub(crate) struct CfgParser {
 }
 
 impl CfgParser {
-    pub(crate) fn new(tokens: Vec<char>) -> Self {
+    fn new(tokens: Vec<char>) -> Self {
         Self {
             tokens,
             start_symbol: String::new(),
@@ -276,13 +277,23 @@ impl CfgParser {
         Ok((j+1, rules))
     }
 
-    pub(crate) fn run(&mut self) -> Result<Cfg, CfgParseError> {
+    fn run(&mut self) -> Result<Cfg, CfgParseError> {
         let i = self.header_directives(0)?;
         let (j, rules) = self.parse_rules(i)?;
         self.footer_tag(j)?;
 
         Ok(Cfg::new(rules))
     }
+}
+
+pub(crate) fn parse(cfgp: &str) -> Result<Cfg, CfgParseError> {
+    let s = fs::read_to_string(cfgp)
+        .map_err(|x| CfgParseError::new(x.to_string()))?;
+    let s_chars: Vec<char> = s.chars().into_iter().collect();
+    let mut parser = CfgParser::new(s_chars);
+    let cfg = parser.run()?;
+
+    Ok(cfg)
 }
 
 #[cfg(test)]
