@@ -2,7 +2,8 @@ use std::{
     fmt,
     rc::Rc,
 };
-use crate::cfg::{LexSymbol, Cfg, parse, NonTermSymbol, TermSymbol, EpsilonSymbol};
+
+use crate::cfg::{Cfg, EpsilonSymbol, LexSymbol, NonTermSymbol, parse, TermSymbol};
 use crate::cfg::parse::CfgParseError;
 
 /// Represents a Cfg graph node/vertex
@@ -17,13 +18,12 @@ pub(crate) struct Node {
 }
 
 impl Node {
-
     /// index points to the index of the dot
     pub(crate) fn new(lhs: String, item: Vec<LexSymbol>, index: usize) -> Self {
         Self {
             lhs,
             item,
-            index
+            index,
         }
     }
 
@@ -59,7 +59,7 @@ impl fmt::Display for Node {
 pub(crate) enum EdgeType {
     Derive,
     Shift,
-    Reduce
+    Reduce,
 }
 
 /// An `Edge` represents a derivation where a symbol has been consumed.
@@ -72,7 +72,7 @@ pub(crate) struct Edge {
     /// symbol consumed
     derived: LexSymbol,
     /// Edge type: derive or reduce
-    edge_type: EdgeType
+    edge_type: EdgeType,
 }
 
 impl Edge {
@@ -84,7 +84,7 @@ impl Edge {
             source,
             target,
             derived,
-            edge_type
+            edge_type,
         }
     }
 }
@@ -94,12 +94,12 @@ impl fmt::Display for Edge {
         let s = match self.edge_type {
             EdgeType::Derive => {
                 format!("{} --> {}", self.source, self.target)
-            },
+            }
             EdgeType::Shift => {
                 format!("{} --<{}>--> {}", self.source, self.derived, self.target)
-            },
+            }
             EdgeType::Reduce => {
-                format!("{} ==> {} <{}>", self.source, self.target, self.derived)
+                format!("{} ==> {}", self.source, self.target)
             }
         };
         write!(f, "{}", s)
@@ -139,10 +139,10 @@ impl CfgGraph {
     ///  - [X: P q . Y]-->[<eps>] [Y: . r] -- derivation
     ///  - [Y: . r] -->[r] [Y: r .] -- shifting terminal `r`
     ///  - [Y: r .] -->[<eps>] [X; P q Y .] -- reduction
-    fn build_edge(&self, nt: &str) -> Option<(Vec<Rc<Node>>, Vec<Edge>, Vec<Rc<Node>>, Vec<Rc<Node>>)> {
+    fn build_edge(&self, nt: &str, parent: &Rc<Node>) -> Option<(Vec<Rc<Node>>, Vec<Edge>, Vec<Rc<Node>>)> {
         let mut nodes = Vec::<Rc<Node>>::new();
         let mut edges = Vec::<Edge>::new();
-        let mut derive_nodes = Vec::<Rc<Node>>::new();
+        // let mut derive_nodes = Vec::<Rc<Node>>::new();
         let mut reduce_nodes = Vec::<Rc<Node>>::new();
         let rule = self.cfg.get_rule(nt)?;
         for alt in &rule.rhs {
@@ -152,10 +152,20 @@ impl CfgGraph {
                     Node::new(rule.lhs.to_owned(), alt.lex_symbols.clone(), i)
                 );
                 let tgt_sym_node = Rc::new(
-                    Node::new(rule.lhs.to_owned(), alt.lex_symbols.clone(), i+1)
+                    Node::new(rule.lhs.to_owned(), alt.lex_symbols.clone(), i + 1)
                 );
                 nodes.push(Rc::clone(&src_sym_node));
                 nodes.push(Rc::clone(&tgt_sym_node));
+
+                // create the derive edge to the parent
+                if i == 0 {
+                    let d_edge = Edge::new(
+                        Rc::clone(&parent),
+                        Rc::clone(&src_sym_node),
+                        LexSymbol::Epsilon(EpsilonSymbol::new()),
+                        EdgeType::Derive);
+                    edges.push(d_edge);
+                }
 
                 match sym {
                     LexSymbol::NonTerm(nt) => {
@@ -164,21 +174,13 @@ impl CfgGraph {
                         let (
                             mut sym_nodes,
                             mut sym_edges,
-                            d_nodes,
-                            r_nodes) = self.build_edge(nt.tok.as_str())?;
+                            r_nodes) = self.build_edge(
+                            nt.tok.as_str(),
+                            &src_sym_node,
+                        )?;
 
                         nodes.append(&mut sym_nodes);
                         edges.append(&mut sym_edges);
-
-                        // connect the src_sym_node to the derive_nodes
-                        for d_n in d_nodes {
-                            let d_edge = Edge::new(
-                                Rc::clone(&src_sym_node),
-                                Rc::clone(&d_n),
-                                LexSymbol::Epsilon(EpsilonSymbol::new()),
-                                EdgeType::Derive);
-                            edges.push(d_edge);
-                        }
 
                         // connect the r_nodes to tgt_sym_node
                         for r_n in r_nodes {
@@ -186,11 +188,11 @@ impl CfgGraph {
                                 Rc::clone(&r_n),
                                 Rc::clone(&tgt_sym_node),
                                 LexSymbol::Epsilon(EpsilonSymbol::new()),
-                                EdgeType::Reduce
+                                EdgeType::Reduce,
                             );
                             edges.push(r_edge);
                         }
-                    },
+                    }
                     LexSymbol::Term(t) => {
                         let sym_edge = Edge::new(
                             Rc::clone(&src_sym_node),
@@ -198,23 +200,19 @@ impl CfgGraph {
                             sym.clone(),
                             EdgeType::Shift);
                         edges.push(sym_edge);
-                    },
+                    }
                     LexSymbol::Epsilon(eps) => {
                         //
                     }
                 }
 
-                if i == 0 {
-                    derive_nodes.push(Rc::clone(&src_sym_node));
-                }
-
-                if i == alt.lex_symbols.len()-1 {
+                if i == alt.lex_symbols.len() - 1 {
                     reduce_nodes.push(Rc::clone(&tgt_sym_node));
                 }
             }
         }
 
-        Some((nodes, edges, derive_nodes, reduce_nodes))
+        Some((nodes, edges, reduce_nodes))
     }
 
     /// Create the two root edges `[:.root]` and `[:root.]` and start building edges.
@@ -229,36 +227,15 @@ impl CfgGraph {
             Node::new(
                 "".to_owned(),
                 vec![LexSymbol::NonTerm(NonTermSymbol::new("root".to_owned()))],
-            1)
+                1)
         );
-        // let root_edge = Edge::new(
-        //     Rc::clone(&root_s),
-        //     Rc::clone(&root_e),
-        // LexSymbol::NonTerm(NonTermSymbol::new("root".to_owned())),
-        // );
         let mut cfg_nodes: Vec<Rc<Node>> = vec![Rc::clone(&root_s), Rc::clone(&root_e)];
         let mut cfg_edges: Vec<Edge> = vec![];
-        let (
-            mut nodes,
-            mut edges,
-            mut d_nodes,
-            mut r_nodes
-        ) = self.build_edge("root")
+        let (mut nodes, mut edges, mut r_nodes) = self.build_edge("root", &root_s)
             .expect("xxx");
 
         cfg_nodes.append(&mut nodes);
         cfg_edges.append(&mut edges);
-
-        // connect root_s to the derive nodes
-        for d_n in d_nodes {
-            let d_edge = Edge::new(
-                Rc::clone(&root_s),
-                Rc::clone(&d_n),
-                LexSymbol::Epsilon(EpsilonSymbol::new()),
-                EdgeType::Derive
-            );
-            cfg_edges.push(d_edge);
-        }
 
         // connect the reduce nodes to root_e
         for r_n in r_nodes {
@@ -266,7 +243,7 @@ impl CfgGraph {
                 Rc::clone(&r_n),
                 Rc::clone(&root_e),
                 LexSymbol::Epsilon(EpsilonSymbol::new()),
-                EdgeType::Reduce
+                EdgeType::Reduce,
             );
             cfg_edges.push(r_edge);
         }
@@ -285,9 +262,10 @@ pub(crate) fn graph(cfgp: &str) -> Result<CfgGraph, CfgParseError> {
 
 #[cfg(test)]
 mod tests {
-    use crate::cfg::graph::{graph, Node};
-    use crate::cfg::{LexSymbol, NonTermSymbol};
     use std::rc::Rc;
+
+    use crate::cfg::{LexSymbol, NonTermSymbol};
+    use crate::cfg::graph::{graph, Node};
 
     #[test]
     fn test_cfg_build_edges() {
