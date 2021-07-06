@@ -1,7 +1,8 @@
 use std::fmt;
 
-mod diagram;
+// mod diagram;
 mod parse;
+mod graph;
 
 #[derive(Debug, Copy, Clone, PartialEq)]
 pub(crate) enum SymType {
@@ -215,6 +216,20 @@ impl Cfg {
         Self {
             rules
         }
+    }
+
+    pub(crate) fn start_rule(&self) -> &CfgRule {
+        &self.rules[0]
+    }
+
+    pub(crate) fn get_rule(&self, name: &str) -> Option<&CfgRule> {
+        for r in &self.rules {
+            if r.lhs.eq(name) {
+                return Some(r);
+            }
+        }
+
+        None
     }
 
     pub(crate) fn terminals_only_alts(&self) -> Vec<(&str, &RuleAlt)> {
