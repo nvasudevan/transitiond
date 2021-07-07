@@ -3,7 +3,7 @@ use std::{
     rc::Rc,
 };
 
-use crate::cfg::{Cfg, EpsilonSymbol, LexSymbol, NonTermSymbol, parse, TermSymbol};
+use crate::cfg::{Cfg, EpsilonSymbol, LexSymbol, NonTermSymbol, parse};
 use crate::cfg::parse::CfgParseError;
 
 /// Represents a Cfg graph node/vertex
@@ -15,24 +15,32 @@ pub(crate) struct Node {
     pub(crate) item: Vec<LexSymbol>,
     // index of the symbol to be derived next
     pub(crate) index: usize,
+    // experimental
+    pub(crate) node_id: usize
 }
 
 impl Node {
     /// index points to the index of the dot
-    pub(crate) fn new(lhs: String, item: Vec<LexSymbol>, index: usize) -> Self {
+    pub(crate) fn new(lhs: String, item: Vec<LexSymbol>, index: usize, node_id: usize) -> Self {
         Self {
             lhs,
             item,
             index,
+            node_id
         }
     }
 
-    pub(crate) fn set_index(&mut self, index: usize) {
-        self.index = index;
-    }
+    pub(crate) fn item_string(&self) -> String {
+        let pre = self.item.get(0..self.index)
+            .expect("fail to retrieve items");
+        let pre_s: Vec<String> = pre.iter()
+            .map(|x| x.to_string()).collect();
+        let post = self.item.get(self.index..)
+            .expect("fail to retrieve items");
+        let post_s: Vec<String> = post.iter()
+            .map(|x| x.to_string()).collect();
 
-    pub(crate) fn next(&self, i: usize) -> Option<&LexSymbol> {
-        self.item.get(i)
+        format!("[{}: {}.{}]", self.lhs, pre_s.join(" "), post_s.join(" "))
     }
 }
 
@@ -47,11 +55,22 @@ impl fmt::Display for Node {
         let post_s: Vec<String> = post.iter()
             .map(|x| x.to_string()).collect();
 
-        write!(f, "{}", format!("[{}: {}.{}]",
+        write!(f, "{}", format!("[{}][{}: {}.{}]",
+                                self.node_id,
                                 self.lhs,
                                 pre_s.join(" "),
                                 post_s.join(" "))
         )
+    }
+}
+
+impl PartialEq for Node {
+    fn eq(&self, other: &Self) -> bool {
+        if self.item_string().eq(&other.item_string()) {
+            return true;
+        }
+
+        false
     }
 }
 
@@ -85,6 +104,24 @@ impl Edge {
             target,
             derived,
             edge_type,
+        }
+    }
+
+    pub(crate) fn derive(source: Rc<Node>, target: Rc<Node>) -> Self {
+        Self {
+            source,
+            target,
+            derived: LexSymbol::Epsilon(EpsilonSymbol::new()),
+            edge_type: EdgeType::Derive
+        }
+    }
+
+    pub(crate) fn reduce(source: Rc<Node>, target: Rc<Node>) -> Self {
+        Self {
+            source,
+            target,
+            derived: LexSymbol::Epsilon(EpsilonSymbol::new()),
+            edge_type: EdgeType::Reduce
         }
     }
 }
@@ -131,6 +168,16 @@ impl CfgGraph {
         Some(v.to_string())
     }
 
+    fn check_cycle(&self, parent: &Rc<Node>, node: &Rc<Node>) -> bool {
+        println!("=> [cycle] :: parent: {}, node: {}", parent, node);
+        if parent.eq(&node) {
+            println!("** IS CYCLE **");
+            return true;
+        }
+
+        false
+    }
+
     /// Build edge for given non-terminal `nt`. Using `Y` as the non-terminal,
     ///  - `X: P 'q' . Y -> X: P 'q' Y.`
     ///  where rule `Y: 'r'`
@@ -139,61 +186,74 @@ impl CfgGraph {
     ///  - [X: P q . Y]-->[<eps>] [Y: . r] -- derivation
     ///  - [Y: . r] -->[r] [Y: r .] -- shifting terminal `r`
     ///  - [Y: r .] -->[<eps>] [X; P q Y .] -- reduction
-    fn build_edge(&self, nt: &str, parent: &Rc<Node>) -> Option<(Vec<Rc<Node>>, Vec<Edge>, Vec<Rc<Node>>)> {
+    fn build_edge(&self, nt: &str, parent: &Rc<Node>, mut node_id: usize) -> Option<(Vec<Rc<Node>>, Vec<Edge>, Vec<Rc<Node>>)> {
         let mut nodes = Vec::<Rc<Node>>::new();
         let mut edges = Vec::<Edge>::new();
-        // let mut derive_nodes = Vec::<Rc<Node>>::new();
         let mut reduce_nodes = Vec::<Rc<Node>>::new();
+
         let rule = self.cfg.get_rule(nt)?;
         for alt in &rule.rhs {
+            let mut prev_node = Rc::clone(&parent);
             println!("alt: {}", alt);
             for (i, sym) in alt.lex_symbols.iter().enumerate() {
-                let src_sym_node = Rc::new(
-                    Node::new(rule.lhs.to_owned(), alt.lex_symbols.clone(), i)
-                );
-                let tgt_sym_node = Rc::new(
-                    Node::new(rule.lhs.to_owned(), alt.lex_symbols.clone(), i + 1)
-                );
-                nodes.push(Rc::clone(&src_sym_node));
-                nodes.push(Rc::clone(&tgt_sym_node));
-
+                let src_sym_node = match i {
+                    0 => {
+                        node_id += 1;
+                        Rc::new(
+                            Node::new(
+                                rule.lhs.to_owned(),
+                                alt.lex_symbols.clone(), i, node_id)
+                        )
+                    },
+                    _ => { prev_node }
+                };
                 // create the derive edge to the parent
                 if i == 0 {
-                    let d_edge = Edge::new(
-                        Rc::clone(&parent),
-                        Rc::clone(&src_sym_node),
-                        LexSymbol::Epsilon(EpsilonSymbol::new()),
-                        EdgeType::Derive);
-                    edges.push(d_edge);
+                    nodes.push(Rc::clone(&src_sym_node));
+                    edges.push(
+                        Edge::derive(
+                            Rc::clone(&parent), Rc::clone(&src_sym_node)
+                        )
+                    );
                 }
+
+                node_id += 1;
+                let tgt_sym_node = Rc::new(
+                    Node::new(rule.lhs.to_owned(),
+                              alt.lex_symbols.clone(),
+                              i + 1, node_id)
+                );
+                nodes.push(Rc::clone(&tgt_sym_node));
 
                 match sym {
                     LexSymbol::NonTerm(nt) => {
                         // if sym is non-terminal, invoke build_edge on it
                         // but before that check for *cycle*
-                        let (
-                            mut sym_nodes,
-                            mut sym_edges,
-                            r_nodes) = self.build_edge(
-                            nt.tok.as_str(),
-                            &src_sym_node,
-                        )?;
+                        if self.check_cycle(parent, &src_sym_node) {
+                             println!("find derive nodes from parent: {}", parent);
+                        } else {
+                            let (
+                                mut sym_nodes,
+                                mut sym_edges,
+                                r_nodes) = self.build_edge(
+                                nt.tok.as_str(),
+                                &src_sym_node,
+                                node_id
+                            )?;
 
-                        nodes.append(&mut sym_nodes);
-                        edges.append(&mut sym_edges);
+                            nodes.append(&mut sym_nodes);
+                            edges.append(&mut sym_edges);
 
-                        // connect the r_nodes to tgt_sym_node
-                        for r_n in r_nodes {
-                            let r_edge = Edge::new(
-                                Rc::clone(&r_n),
-                                Rc::clone(&tgt_sym_node),
-                                LexSymbol::Epsilon(EpsilonSymbol::new()),
-                                EdgeType::Reduce,
-                            );
-                            edges.push(r_edge);
+                            // connect the r_nodes to tgt_sym_node
+                            for r_n in r_nodes {
+                                edges.push(Edge::reduce(
+                                    Rc::clone(&r_n),
+                                    Rc::clone(&tgt_sym_node)
+                                ));
+                            }
                         }
                     }
-                    LexSymbol::Term(t) => {
+                    LexSymbol::Term(_) => {
                         let sym_edge = Edge::new(
                             Rc::clone(&src_sym_node),
                             Rc::clone(&tgt_sym_node),
@@ -201,7 +261,7 @@ impl CfgGraph {
                             EdgeType::Shift);
                         edges.push(sym_edge);
                     }
-                    LexSymbol::Epsilon(eps) => {
+                    LexSymbol::Epsilon(_) => {
                         //
                     }
                 }
@@ -209,6 +269,9 @@ impl CfgGraph {
                 if i == alt.lex_symbols.len() - 1 {
                     reduce_nodes.push(Rc::clone(&tgt_sym_node));
                 }
+
+                // now set the prev_node to tgt_sym_node for the symbols with i>0;
+                prev_node = Rc::clone(&tgt_sym_node);
             }
         }
 
@@ -217,35 +280,38 @@ impl CfgGraph {
 
     /// Create the two root edges `[:.root]` and `[:root.]` and start building edges.
     pub(crate) fn start_edging(&self) -> (Vec<Rc<Node>>, Vec<Edge>) {
+        let mut node_id = 0;
         let root_s = Rc::new(
             Node::new(
                 "".to_owned(),
                 vec![LexSymbol::NonTerm(NonTermSymbol::new("root".to_owned()))],
-                0)
+                0,
+                node_id)
         );
         let root_e = Rc::new(
             Node::new(
                 "".to_owned(),
                 vec![LexSymbol::NonTerm(NonTermSymbol::new("root".to_owned()))],
-                1)
+                1,
+                node_id)
         );
         let mut cfg_nodes: Vec<Rc<Node>> = vec![Rc::clone(&root_s), Rc::clone(&root_e)];
         let mut cfg_edges: Vec<Edge> = vec![];
-        let (mut nodes, mut edges, mut r_nodes) = self.build_edge("root", &root_s)
-            .expect("xxx");
+        let (
+            mut nodes,
+            mut edges,
+            r_nodes
+        ) = self.build_edge("root", &root_s, node_id).expect("xxx");
 
         cfg_nodes.append(&mut nodes);
         cfg_edges.append(&mut edges);
 
         // connect the reduce nodes to root_e
         for r_n in r_nodes {
-            let r_edge = Edge::new(
+            cfg_edges.push(Edge::reduce(
                 Rc::clone(&r_n),
-                Rc::clone(&root_e),
-                LexSymbol::Epsilon(EpsilonSymbol::new()),
-                EdgeType::Reduce,
-            );
-            cfg_edges.push(r_edge);
+                Rc::clone(&root_e)
+            ));
         }
 
         (cfg_nodes, cfg_edges)
@@ -255,21 +321,18 @@ impl CfgGraph {
 pub(crate) fn graph(cfgp: &str) -> Result<CfgGraph, CfgParseError> {
     let cfg = parse::parse(cfgp)?;
     println!("cfg:\n{}", cfg);
-    let mut graph = CfgGraph::new(cfg);
+    let graph = CfgGraph::new(cfg);
 
     Ok(graph)
 }
 
 #[cfg(test)]
 mod tests {
-    use std::rc::Rc;
-
-    use crate::cfg::{LexSymbol, NonTermSymbol};
-    use crate::cfg::graph::{graph, Node};
+    use crate::cfg::graph::graph;
 
     #[test]
     fn test_cfg_build_edges() {
-        let mut g = graph("./grammars/simple.y")
+        let g = graph("./grammars/simple.y")
             .expect("grammar parse failed");
         let (nodes, edges) = g.start_edging();
         println!("\n=> nodes:\n");
@@ -284,7 +347,7 @@ mod tests {
 
     #[test]
     fn test_cfg_rec_build_edges() {
-        let mut g = graph("./grammars/rec_direct.y")
+        let g = graph("./grammars/rec_direct.y")
             .expect("grammar parse failed");
         let (nodes, edges) = g.start_edging();
         println!("\n=> nodes:\n");
