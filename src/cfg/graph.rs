@@ -244,6 +244,20 @@ impl GraphResult {
 
         self.edges.push(edge);
     }
+
+    pub(crate) fn update_reduce_edges(&mut self, target_node: &Rc<Node>) {
+        loop {
+            match self.reduce_nodes.pop() {
+                Some(r_n) => {
+                    self.add_edge(Rc::from(Edge::reduce(
+                        Rc::clone(&r_n),
+                        Rc::clone(&target_node),
+                    )));
+                }
+                _ => { break }
+            }
+        }
+    }
 }
 
 /// Represents a CFG graph
@@ -326,24 +340,8 @@ impl CfgGraph {
                         if self.check_cycle(parent, &src_sym_node) {
                             println!("find derive nodes from parent: {}", parent);
                         } else {
-                            self.build_edge(
-                                nt.tok.as_str(),
-                                &src_sym_node,
-                                &mut g_result
-                            );
-
-                            // connect the r_nodes to tgt_sym_node
-                            loop {
-                                match g_result.reduce_nodes.pop() {
-                                    Some(r_n) => {
-                                        g_result.add_edge(Rc::from(Edge::reduce(
-                                            Rc::clone(&r_n),
-                                            Rc::clone(&tgt_sym_node),
-                                        )));
-                                    }
-                                    _ => { break }
-                                }
-                            }
+                            self.build_edge( nt.tok.as_str(), &src_sym_node, &mut g_result );
+                            g_result.update_reduce_edges(&tgt_sym_node);
                         }
                     }
                     LexSymbol::Term(_) => {
@@ -392,19 +390,7 @@ impl CfgGraph {
         self.build_edge( "root", &root_s, &mut g_result);
 
         // connect the reduce nodes to root_e
-        loop {
-            match g_result.reduce_nodes.pop() {
-                Some(r_n) => {
-                    let r_edge = Rc::new(Edge::reduce(
-                        Rc::clone(&r_n),
-                        Rc::clone(&root_e),
-                    ));
-
-                    g_result.add_edge(r_edge);
-                },
-                _ => { break }
-            }
-        }
+        g_result.update_reduce_edges(&root_e);
 
         g_result
     }
