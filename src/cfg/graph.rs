@@ -185,19 +185,44 @@ impl fmt::Display for InOutEdges {
     }
 }
 
-pub(crate) struct NodeEdgeMap {
+pub(crate) struct GraphResult {
+    pub(crate) nodes: Vec<Rc<Node>>,
+    pub(crate) edges: Vec<Rc<Edge>>,
     pub(crate) node_edge_map: HashMap<usize, InOutEdges>,
+    pub(crate) reduce_nodes: Vec<Rc<Node>>,
+    node_id: usize,
 }
 
-impl NodeEdgeMap {
+impl GraphResult {
     pub(crate) fn new() -> Self {
         Self {
-            node_edge_map: HashMap::new()
+            nodes: vec![],
+            edges: vec![],
+            node_edge_map: Default::default(),
+            reduce_nodes: vec![],
+            node_id: 0,
         }
     }
 
-    /// add outbound for the source node, and add inbound for the target node
+    pub(crate) fn node_id(&self) -> usize {
+        self.node_id
+    }
+
+    pub(crate) fn inc_node_id(&mut self) -> usize {
+        self.node_id += 1;
+        self.node_id
+    }
+
+    pub(crate) fn add_node(&mut self, node: Rc<Node>) {
+        self.nodes.push(node);
+    }
+
     pub(crate) fn add_edge(&mut self, edge: Rc<Edge>) {
+        self.edges.push(edge);
+    }
+
+    /// add outbound for the source node, and add inbound for the target node
+    pub(crate) fn add_node_edge(&mut self, edge: Rc<Edge>) {
         let src_node = &edge.source;
         let tgt_node = &edge.target;
         match self.node_edge_map.get_mut(&src_node.node_id) {
@@ -224,41 +249,6 @@ impl NodeEdgeMap {
     }
 }
 
-pub(crate) struct GraphResult {
-    pub(crate) nodes: Vec<Rc<Node>>,
-    pub(crate) edges: Vec<Rc<Edge>>,
-    pub(crate) reduce_nodes: Vec<Rc<Node>>,
-    node_id: usize,
-}
-
-impl GraphResult {
-    pub(crate) fn new() -> Self {
-        Self {
-            nodes: vec![],
-            edges: vec![],
-            reduce_nodes: vec![],
-            node_id: 0,
-        }
-    }
-
-    pub(crate) fn node_id(&self) -> usize {
-        self.node_id
-    }
-
-    pub(crate) fn inc_node_id(&mut self) -> usize {
-        self.node_id += 1;
-        self.node_id
-    }
-
-    pub(crate) fn add_node(&mut self, node: Rc<Node>) {
-        self.nodes.push(node);
-    }
-
-    pub(crate) fn add_edge(&mut self, edge: Rc<Edge>) {
-        self.edges.push(edge);
-    }
-}
-
 /// Represents a CFG graph
 #[derive(Debug)]
 pub(crate) struct CfgGraph {
@@ -274,14 +264,6 @@ impl CfgGraph {
             nodes: Vec::<Rc<Node>>::new(),
             edges: vec![],
         }
-    }
-
-    fn next_symbol(&self, s: &str) -> Option<String> {
-        let i = s.find('.')
-            .expect("No dot");
-        let v: &str = s.get(i + 1..i + 2)?;
-
-        Some(v.to_string())
     }
 
     fn check_cycle(&self, parent: &Rc<Node>, node: &Rc<Node>) -> bool {
@@ -302,17 +284,8 @@ impl CfgGraph {
     ///  - [X: P q . Y]-->[<eps>] [Y: . r] -- derivation
     ///  - [Y: . r] -->[r] [Y: r .] -- shifting terminal `r`
     ///  - [Y: r .] -->[<eps>] [X; P q Y .] -- reduction
-    fn build_edge(&self,
-                  nt: &str,
-                  parent: &Rc<Node>,
-                  mut node_edge_map: &mut NodeEdgeMap,
-                  mut g_result: &mut GraphResult)
-                  -> Option<(Vec<Rc<Node>>, Vec<Rc<Edge>>)>
-    {
-        let mut nodes = Vec::<Rc<Node>>::new();
-        let mut edges = Vec::<Rc<Edge>>::new();
-
-        let rule = self.cfg.get_rule(nt)?;
+    fn build_edge(&self, nt: &str, parent: &Rc<Node>, mut g_result: &mut GraphResult) {
+        let rule = self.cfg.get_rule(nt).expect("No such rule");
         for alt in &rule.rhs {
             let mut prev_node = Rc::clone(&parent);
             for (i, sym) in alt.lex_symbols.iter().enumerate() {
@@ -321,27 +294,33 @@ impl CfgGraph {
                         Rc::new(
                             Node::new(
                                 rule.lhs.to_owned(),
-                                alt.lex_symbols.clone(), i, g_result.inc_node_id())
+                                alt.lex_symbols.clone(),
+                                i,
+                                g_result.inc_node_id()
+                            )
                         )
                     }
                     _ => { prev_node }
                 };
                 // create the derive edge from the parent
                 if i == 0 {
-                    nodes.push(Rc::clone(&src_sym_node));
+                    g_result.add_node(Rc::clone(&src_sym_node));
                     let derive_edge = Rc::from(Edge::derive(
                         Rc::clone(&parent), Rc::clone(&src_sym_node),
                     ));
-                    edges.push(Rc::clone(&derive_edge));
-                    node_edge_map.add_edge(derive_edge);
+                    g_result.add_edge(Rc::clone(&derive_edge));
+                    g_result.add_node_edge(derive_edge);
                 }
 
                 let tgt_sym_node = Rc::new(
-                    Node::new(rule.lhs.to_owned(),
-                              alt.lex_symbols.clone(),
-                              i + 1, g_result.inc_node_id())
+                    Node::new(
+                        rule.lhs.to_owned(),
+                        alt.lex_symbols.clone(),
+                        i + 1,
+                        g_result.inc_node_id()
+                    )
                 );
-                nodes.push(Rc::clone(&tgt_sym_node));
+                g_result.add_node(Rc::clone(&tgt_sym_node));
 
                 match sym {
                     LexSymbol::NonTerm(nt) => {
@@ -350,23 +329,18 @@ impl CfgGraph {
                         if self.check_cycle(parent, &src_sym_node) {
                             println!("find derive nodes from parent: {}", parent);
                         } else {
-                            let (
-                                mut sym_nodes,
-                                mut sym_edges) = self.build_edge(
+                            self.build_edge(
                                 nt.tok.as_str(),
                                 &src_sym_node,
-                                &mut node_edge_map,
                                 &mut g_result
-                            )?;
-
-                            nodes.append(&mut sym_nodes);
-                            edges.append(&mut sym_edges);
+                            );
 
                             // connect the r_nodes to tgt_sym_node
                             let mut j = 0;
                             loop {
-                                let r_n = g_result.reduce_nodes.pop()?;
-                                edges.push(Rc::from(Edge::reduce(
+                                let r_n = g_result.reduce_nodes.pop()
+                                    .expect("reduce nodes pop failed!");
+                                g_result.add_edge(Rc::from(Edge::reduce(
                                     Rc::clone(&r_n),
                                     Rc::clone(&tgt_sym_node),
                                 )));
@@ -378,12 +352,12 @@ impl CfgGraph {
                         }
                     }
                     LexSymbol::Term(_) => {
-                        let sym_edge = Edge::new(
+                        let shift_edge = Edge::new(
                             Rc::clone(&src_sym_node),
                             Rc::clone(&tgt_sym_node),
                             sym.clone(),
                             EdgeType::Shift);
-                        edges.push(Rc::from(sym_edge));
+                        g_result.add_edge(Rc::from(shift_edge));
                     }
                     LexSymbol::Epsilon(_) => {
                         //
@@ -398,39 +372,29 @@ impl CfgGraph {
                 prev_node = Rc::clone(&tgt_sym_node);
             }
         }
-
-        Some((nodes, edges))
     }
 
     /// Create the two root edges `[:.root]` and `[:root.]` and start building edges.
-    pub(crate) fn start_edging(&self) -> (GraphResult, NodeEdgeMap) {
-        // let mut cfg_nodes: Vec<Rc<Node>> = vec![];
-        // let mut cfg_edges: Vec<Rc<Edge>> = vec![];
-        let mut node_edge_map: NodeEdgeMap = NodeEdgeMap::new();
+    pub(crate) fn start_edging(&self) -> GraphResult {
         let mut g_result = GraphResult::new();
-
-        let mut root_s_node = Node::new(
+        let root_s_node = Node::new(
             "".to_owned(),
             vec![LexSymbol::NonTerm(NonTermSymbol::new("root".to_owned()))],
             0,
             g_result.node_id());
-        let mut root_s = Rc::new(root_s_node);
+        let root_s = Rc::new(root_s_node);
 
-        let mut root_e_node = Node::new(
+        let root_e_node = Node::new(
             "".to_owned(),
             vec![LexSymbol::NonTerm(NonTermSymbol::new("root".to_owned()))],
             1,
             g_result.inc_node_id());
-        let mut root_e = Rc::new(root_e_node);
-
+        let root_e = Rc::new(root_e_node);
         g_result.add_node(Rc::clone(&root_s));
         g_result.add_node(Rc::clone(&root_e));
-        let (mut nodes, mut edges) = self.build_edge(
-            "root", &root_s, &mut node_edge_map, &mut g_result
-        ).expect("xxx");
 
-        g_result.nodes.append(&mut nodes);
-        g_result.edges.append(&mut edges);
+        // start build edges from root rule
+        self.build_edge( "root", &root_s, &mut g_result);
 
         // connect the reduce nodes to root_e
         let mut j = 0;
@@ -441,7 +405,7 @@ impl CfgGraph {
                 Rc::clone(&root_e),
             ));
 
-            node_edge_map.add_edge(Rc::clone(&r_edge));
+            g_result.add_node_edge(Rc::clone(&r_edge));
             g_result.add_edge(r_edge);
             j += 1;
             if j >= g_result.reduce_nodes.len() {
@@ -449,7 +413,7 @@ impl CfgGraph {
             }
         }
 
-        (g_result, node_edge_map)
+        g_result
     }
 }
 
@@ -469,7 +433,7 @@ mod tests {
     fn test_cfg_build_edges() {
         let g = graph("./grammars/simple.y")
             .expect("grammar parse failed");
-        let (g_result, node_edge_map) = g.start_edging();
+        let g_result = g.start_edging();
         println!("\n=> nodes:\n");
         for n in g_result.nodes {
             println!("n: {}", n);
@@ -484,7 +448,7 @@ mod tests {
     fn test_cfg_rec_build_edges() {
         let g = graph("./grammars/rec_direct.y")
             .expect("grammar parse failed");
-        let (g_result, node_edge_map) = g.start_edging();
+        let g_result  = g.start_edging();
         println!("\n=> nodes:\n");
         for n in g_result.nodes {
             println!("n: {}", n);
@@ -493,7 +457,7 @@ mod tests {
         for e in g_result.edges {
             println!("e: {}", e);
         }
-        for (node_id, in_out) in node_edge_map.node_edge_map.iter() {
+        for (node_id, in_out) in g_result.node_edge_map.iter() {
             println!("\n=> node: {}{}", node_id, in_out);
         }
     }

@@ -218,10 +218,6 @@ impl Cfg {
         }
     }
 
-    pub(crate) fn start_rule(&self) -> &CfgRule {
-        &self.rules[0]
-    }
-
     pub(crate) fn get_rule(&self, name: &str) -> Option<&CfgRule> {
         for r in &self.rules {
             if r.lhs.eq(name) {
