@@ -249,6 +249,14 @@ impl GraphResult {
         self.node_id += 1;
         self.node_id
     }
+
+    pub(crate) fn add_node(&mut self, node: Rc<Node>) {
+        self.nodes.push(node);
+    }
+
+    pub(crate) fn add_edge(&mut self, edge: Rc<Edge>) {
+        self.edges.push(edge);
+    }
 }
 
 /// Represents a CFG graph
@@ -395,9 +403,9 @@ impl CfgGraph {
     }
 
     /// Create the two root edges `[:.root]` and `[:root.]` and start building edges.
-    pub(crate) fn start_edging(&self) -> (Vec<Rc<Node>>, Vec<Rc<Edge>>, NodeEdgeMap) {
-        let mut cfg_nodes: Vec<Rc<Node>> = vec![];
-        let mut cfg_edges: Vec<Rc<Edge>> = vec![];
+    pub(crate) fn start_edging(&self) -> (GraphResult, NodeEdgeMap) {
+        // let mut cfg_nodes: Vec<Rc<Node>> = vec![];
+        // let mut cfg_edges: Vec<Rc<Edge>> = vec![];
         let mut node_edge_map: NodeEdgeMap = NodeEdgeMap::new();
         let mut g_result = GraphResult::new();
 
@@ -408,7 +416,6 @@ impl CfgGraph {
             g_result.node_id());
         let mut root_s = Rc::new(root_s_node);
 
-        // node_id += 1;
         let mut root_e_node = Node::new(
             "".to_owned(),
             vec![LexSymbol::NonTerm(NonTermSymbol::new("root".to_owned()))],
@@ -416,15 +423,14 @@ impl CfgGraph {
             g_result.inc_node_id());
         let mut root_e = Rc::new(root_e_node);
 
-        cfg_nodes.push(Rc::clone(&root_s));
-        cfg_nodes.push(Rc::clone(&root_e));
-        let (
-            mut nodes,
-            mut edges) = self.build_edge("root", &root_s, &mut node_edge_map, &mut g_result)
-            .expect("xxx");
+        g_result.add_node(Rc::clone(&root_s));
+        g_result.add_node(Rc::clone(&root_e));
+        let (mut nodes, mut edges) = self.build_edge(
+            "root", &root_s, &mut node_edge_map, &mut g_result
+        ).expect("xxx");
 
-        cfg_nodes.append(&mut nodes);
-        cfg_edges.append(&mut edges);
+        g_result.nodes.append(&mut nodes);
+        g_result.edges.append(&mut edges);
 
         // connect the reduce nodes to root_e
         let mut j = 0;
@@ -436,14 +442,14 @@ impl CfgGraph {
             ));
 
             node_edge_map.add_edge(Rc::clone(&r_edge));
-            cfg_edges.push(r_edge);
+            g_result.add_edge(r_edge);
             j += 1;
             if j >= g_result.reduce_nodes.len() {
                 break
             }
         }
 
-        (cfg_nodes, cfg_edges, node_edge_map)
+        (g_result, node_edge_map)
     }
 }
 
@@ -463,13 +469,13 @@ mod tests {
     fn test_cfg_build_edges() {
         let g = graph("./grammars/simple.y")
             .expect("grammar parse failed");
-        let (nodes, edges, node_edge_map) = g.start_edging();
+        let (g_result, node_edge_map) = g.start_edging();
         println!("\n=> nodes:\n");
-        for n in nodes {
+        for n in g_result.nodes {
             println!("n: {}", n);
         }
         println!("\n=> edges:\n");
-        for e in edges {
+        for e in g_result.edges {
             println!("e: {}", e);
         }
     }
@@ -478,13 +484,13 @@ mod tests {
     fn test_cfg_rec_build_edges() {
         let g = graph("./grammars/rec_direct.y")
             .expect("grammar parse failed");
-        let (nodes, edges, node_edge_map) = g.start_edging();
+        let (g_result, node_edge_map) = g.start_edging();
         println!("\n=> nodes:\n");
-        for n in nodes {
+        for n in g_result.nodes {
             println!("n: {}", n);
         }
         println!("\n=> edges:\n");
-        for e in edges {
+        for e in g_result.edges {
             println!("e: {}", e);
         }
         for (node_id, in_out) in node_edge_map.node_edge_map.iter() {
