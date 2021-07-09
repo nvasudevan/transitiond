@@ -218,11 +218,6 @@ impl GraphResult {
     }
 
     pub(crate) fn add_edge(&mut self, edge: Rc<Edge>) {
-        self.edges.push(edge);
-    }
-
-    /// add outbound for the source node, and add inbound for the target node
-    pub(crate) fn add_node_edge(&mut self, edge: Rc<Edge>) {
         let src_node = &edge.source;
         let tgt_node = &edge.target;
         match self.node_edge_map.get_mut(&src_node.node_id) {
@@ -246,6 +241,8 @@ impl GraphResult {
                 self.node_edge_map.insert(tgt_node.node_id, in_out);
             }
         }
+
+        self.edges.push(edge);
     }
 }
 
@@ -308,8 +305,8 @@ impl CfgGraph {
                     let derive_edge = Rc::from(Edge::derive(
                         Rc::clone(&parent), Rc::clone(&src_sym_node),
                     ));
-                    g_result.add_edge(Rc::clone(&derive_edge));
-                    g_result.add_node_edge(derive_edge);
+                    g_result.add_edge(derive_edge);
+                    // g_result.add_node_edge(derive_edge);
                 }
 
                 let tgt_sym_node = Rc::new(
@@ -336,17 +333,15 @@ impl CfgGraph {
                             );
 
                             // connect the r_nodes to tgt_sym_node
-                            let mut j = 0;
                             loop {
-                                let r_n = g_result.reduce_nodes.pop()
-                                    .expect("reduce nodes pop failed!");
-                                g_result.add_edge(Rc::from(Edge::reduce(
-                                    Rc::clone(&r_n),
-                                    Rc::clone(&tgt_sym_node),
-                                )));
-                                j += 1;
-                                if j >= g_result.reduce_nodes.len() {
-                                    break
+                                match g_result.reduce_nodes.pop() {
+                                    Some(r_n) => {
+                                        g_result.add_edge(Rc::from(Edge::reduce(
+                                            Rc::clone(&r_n),
+                                            Rc::clone(&tgt_sym_node),
+                                        )));
+                                    }
+                                    _ => { break }
                                 }
                             }
                         }
@@ -397,19 +392,17 @@ impl CfgGraph {
         self.build_edge( "root", &root_s, &mut g_result);
 
         // connect the reduce nodes to root_e
-        let mut j = 0;
         loop {
-            let r_n = g_result.reduce_nodes.pop().expect("fail at reduce nodes!");
-            let r_edge = Rc::new(Edge::reduce(
-                Rc::clone(&r_n),
-                Rc::clone(&root_e),
-            ));
+            match g_result.reduce_nodes.pop() {
+                Some(r_n) => {
+                    let r_edge = Rc::new(Edge::reduce(
+                        Rc::clone(&r_n),
+                        Rc::clone(&root_e),
+                    ));
 
-            g_result.add_node_edge(Rc::clone(&r_edge));
-            g_result.add_edge(r_edge);
-            j += 1;
-            if j >= g_result.reduce_nodes.len() {
-                break
+                    g_result.add_edge(r_edge);
+                },
+                _ => { break }
             }
         }
 
