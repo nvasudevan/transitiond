@@ -75,7 +75,7 @@ impl PartialEq for Node {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub(crate) enum EdgeType {
     Derive,
     Shift,
@@ -245,18 +245,52 @@ impl GraphResult {
         self.edges.push(edge);
     }
 
-    pub(crate) fn update_reduce_edges(&mut self, target_node: &Rc<Node>) {
-        loop {
-            match self.reduce_nodes.pop() {
-                Some(r_n) => {
-                    self.add_edge(Rc::from(Edge::reduce(
-                        Rc::clone(&r_n),
-                        Rc::clone(&target_node),
-                    )));
-                }
-                _ => { break }
-            }
-        }
+    /// Update reduce edges to `target_node`.
+    pub(crate) fn update_reductions(&mut self, target_node: &Rc<Node>) {
+        let mut edges: Vec<Rc<Edge>> =  self.reduce_nodes
+            .drain(..)
+            .map({|src_node|
+                Rc::from(
+                    Edge::reduce(
+                        Rc::clone(&src_node),
+                        Rc::clone(&target_node)
+                    )
+                )
+            })
+            .collect();
+
+        self.edges.append(&mut edges);
+    }
+
+    /// Add a derivation edge
+    fn add_derivation(&mut self, parent: &Rc<Node>, node: &Rc<Node>) {
+        self.add_node(Rc::clone(node));
+        let derive_edge = Rc::from(Edge::derive(
+            Rc::clone(parent), Rc::clone(node),
+        ));
+        self.add_edge(derive_edge);
+    }
+
+    fn add_shift_edge(&mut self, src: &Rc<Node>, tgt: &Rc<Node>, derived: &LexSymbol) {
+        let shift_edge = Edge::new(
+            Rc::clone(&src),
+            Rc::clone(&tgt),
+            derived.clone(),
+            EdgeType::Shift);
+        self.add_edge(Rc::from(shift_edge));
+    }
+
+    /// Return the list of nodes which have derive edges from `node`
+    fn derivations_from(&self, node: &Rc<Node>) -> Vec<Rc<Node>> {
+        let edges = self.node_edge_map.get(&node.node_id)
+            .expect(&format!("Unable to find node: {}", node));
+        let nodes: Vec<Rc<Node>> = edges.out_edges
+            .iter()
+            .filter(|e| e.edge_type == EdgeType::Derive )
+            .map(|e| Rc::clone(&e.target))
+            .collect();
+
+        nodes
     }
 }
 
@@ -278,9 +312,9 @@ impl CfgGraph {
     }
 
     fn check_cycle(&self, parent: &Rc<Node>, node: &Rc<Node>) -> bool {
-        println!("=> [cycle] :: parent: {}, node: {}", parent, node);
+        println!("=> [cycle-check]:: parent: {} <- node: {}", parent, node);
         if parent.eq(&node) {
-            println!("** IS CYCLE **");
+            println!("** CYCLE DETECTED **");
             return true;
         }
 
@@ -316,11 +350,7 @@ impl CfgGraph {
                 };
                 // create the derive edge from the parent
                 if i == 0 {
-                    g_result.add_node(Rc::clone(&src_sym_node));
-                    let derive_edge = Rc::from(Edge::derive(
-                        Rc::clone(&parent), Rc::clone(&src_sym_node),
-                    ));
-                    g_result.add_edge(derive_edge);
+                    g_result.add_derivation(&parent, &src_sym_node);
                 }
 
                 let tgt_sym_node = Rc::new(
@@ -338,23 +368,24 @@ impl CfgGraph {
                         // if sym is non-terminal, invoke build_edge on it
                         // but before that check for *cycle*
                         if self.check_cycle(parent, &src_sym_node) {
-                            println!("find derive nodes from parent: {}", parent);
+                            println!("derive nodes from parent: {}", parent);
+                            let drv_nodes = g_result.derivations_from(&parent);
+                            for drv_node in drv_nodes {
+                                let drv_edge = Edge::derive(
+                                    Rc::clone(&src_sym_node),
+                                    Rc::clone(&drv_node)
+                                );
+                                g_result.add_edge(Rc::from(drv_edge));
+                            }
                         } else {
                             self.build_edge(nt.tok.as_str(), &src_sym_node, &mut g_result);
-                            g_result.update_reduce_edges(&tgt_sym_node);
+                            g_result.update_reductions(&tgt_sym_node);
                         }
                     }
                     LexSymbol::Term(_) => {
-                        let shift_edge = Edge::new(
-                            Rc::clone(&src_sym_node),
-                            Rc::clone(&tgt_sym_node),
-                            sym.clone(),
-                            EdgeType::Shift);
-                        g_result.add_edge(Rc::from(shift_edge));
+                        g_result.add_shift_edge(&src_sym_node, &tgt_sym_node, &sym);
                     }
-                    LexSymbol::Epsilon(_) => {
-                        //
-                    }
+                    LexSymbol::Epsilon(_) => {}
                 }
 
                 if i == alt.lex_symbols.len() - 1 {
@@ -393,7 +424,7 @@ impl CfgGraph {
         self.build_edge( "root", &root_s, &mut g_result);
 
         // connect the reduce nodes to root_e
-        g_result.update_reduce_edges(&root_e);
+        g_result.update_reductions(&root_e);
 
         g_result
     }
