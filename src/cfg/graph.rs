@@ -297,6 +297,7 @@ impl CfgGraph {
     ///  - [Y: r .] -->[<eps>] [X; P q Y .] -- reduction
     fn build_edge(&self, nt: &str, parent: &Rc<Node>, mut g_result: &mut GraphResult) {
         let rule = self.cfg.get_rule(nt).expect("No such rule");
+        let mut reduce_nodes: Vec<Rc<Node>> = vec![];
         for alt in &rule.rhs {
             let mut prev_node = Rc::clone(&parent);
             for (i, sym) in alt.lex_symbols.iter().enumerate() {
@@ -320,7 +321,6 @@ impl CfgGraph {
                         Rc::clone(&parent), Rc::clone(&src_sym_node),
                     ));
                     g_result.add_edge(derive_edge);
-                    // g_result.add_node_edge(derive_edge);
                 }
 
                 let tgt_sym_node = Rc::new(
@@ -340,7 +340,7 @@ impl CfgGraph {
                         if self.check_cycle(parent, &src_sym_node) {
                             println!("find derive nodes from parent: {}", parent);
                         } else {
-                            self.build_edge( nt.tok.as_str(), &src_sym_node, &mut g_result );
+                            self.build_edge(nt.tok.as_str(), &src_sym_node, &mut g_result);
                             g_result.update_reduce_edges(&tgt_sym_node);
                         }
                     }
@@ -358,13 +358,16 @@ impl CfgGraph {
                 }
 
                 if i == alt.lex_symbols.len() - 1 {
-                    g_result.reduce_nodes.push(Rc::clone(&tgt_sym_node));
+                    reduce_nodes.push(Rc::clone(&tgt_sym_node));
                 }
 
                 // now set the prev_node to tgt_sym_node for the symbols with i>0;
                 prev_node = Rc::clone(&tgt_sym_node);
             }
         }
+
+        // now we are ready to append the reduce nodes
+        g_result.reduce_nodes.append(&mut reduce_nodes);
     }
 
     /// Create the two root edges `[:.root]` and `[:root.]` and start building edges.
