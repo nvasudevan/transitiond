@@ -246,20 +246,19 @@ impl GraphResult {
     }
 
     /// Update reduce edges to `target_node`.
-    pub(crate) fn update_reductions(&mut self, target_node: &Rc<Node>) {
-        let mut edges: Vec<Rc<Edge>> =  self.reduce_nodes
+    pub(crate) fn update_reductions(&mut self, target: &Rc<Node>) {
+        let edges: Vec<Rc<Edge>> =  self.reduce_nodes
             .drain(..)
-            .map({|src_node|
+            .map({|src|
                 Rc::from(
-                    Edge::reduce(
-                        Rc::clone(&src_node),
-                        Rc::clone(&target_node)
-                    )
+                    Edge::reduce(Rc::clone(&src), Rc::clone(&target))
                 )
             })
             .collect();
 
-        self.edges.append(&mut edges);
+        for edge in edges {
+            self.add_edge(edge);
+        }
     }
 
     /// Add a derivation edge
@@ -385,7 +384,10 @@ impl CfgGraph {
                     LexSymbol::Term(_) => {
                         g_result.add_shift_edge(&src_sym_node, &tgt_sym_node, &sym);
                     }
-                    LexSymbol::Epsilon(_) => {}
+                    LexSymbol::Epsilon(_) => {
+                        println!("alt, eps: {}: {}", rule.lhs, alt);
+                        g_result.add_shift_edge(&src_sym_node, &tgt_sym_node, &sym);
+                    }
                 }
 
                 if i == alt.lex_symbols.len() - 1 {
@@ -454,6 +456,9 @@ mod tests {
         println!("\n=> edges:\n");
         for e in g_result.edges {
             println!("e: {}", e);
+        }
+        for (node_id, in_out) in g_result.node_edge_map.iter() {
+            println!("\n=> node: {}{}", node_id, in_out);
         }
     }
 
