@@ -196,7 +196,27 @@ impl fmt::Display for InOutEdges {
         for out_edge in &self.out_edges {
             s.push_str(&format!("\n{}", out_edge.to_string()));
         }
+        write!(f, "{}", s)
+    }
+}
 
+pub(crate) struct CyclicLink {
+    pub(crate) node: Rc<Node>,
+    pub(crate) parent: Rc<Node>
+}
+
+impl CyclicLink {
+    pub(crate) fn new(node: &Rc<Node>, parent: &Rc<Node>) -> Self {
+        Self {
+            node: Rc::clone(node),
+            parent: Rc::clone(parent)
+        }
+    }
+}
+
+impl fmt::Display for CyclicLink {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let s = format!("[cycle] parent: {}, node: {}", self.parent, self.node);
         write!(f, "{}", s)
     }
 }
@@ -206,6 +226,7 @@ pub(crate) struct GraphResult {
     pub(crate) edges: Vec<Rc<Edge>>,
     pub(crate) node_edge_map: HashMap<usize, InOutEdges>,
     pub(crate) reduce_nodes: Vec<Rc<Node>>,
+    pub(crate) cyclic_links: Vec<CyclicLink>,
     node_id: usize,
 }
 
@@ -216,6 +237,7 @@ impl GraphResult {
             edges: vec![],
             node_edge_map: Default::default(),
             reduce_nodes: vec![],
+            cyclic_links: vec![],
             node_id: 0,
         }
     }
@@ -231,6 +253,10 @@ impl GraphResult {
 
     pub(crate) fn add_node(&mut self, node: Rc<Node>) {
         self.nodes.push(node);
+    }
+
+    pub(crate) fn add_cycle_link(&mut self, link: CyclicLink) {
+        self.cyclic_links.push(link)
     }
 
     pub(crate) fn add_edge(&mut self, edge: Rc<Edge>) {
@@ -296,19 +322,29 @@ impl GraphResult {
         }
     }
 
-    /// Add cycle derivations, from `from` node to the derives nodes
-    /// originating from `parent`.
-    fn add_cycle_derivations(&mut self, parent: &Rc<Node>, from: &Rc<Node>) {
-        let edges = self.node_edge_map.get(&parent.node_id)
-            .expect(&format!("Unable to find parent: {}", parent));
-        let nodes: Vec<Rc<Node>> = edges.out_edges
-            .iter()
-            .filter(|e| e.edge_type == EdgeType::Derive)
-            .map(|e| Rc::clone(&e.target))
-            .collect();
+    /// Add cycle derivations from `cyclic_links`
+    fn add_cycle_derivations(&mut self) {
+        let mut cycle_edges = Vec::<Rc<Edge>>::new();
+        for link in &self.cyclic_links {
+            let edges = self.node_edge_map.get(&link.parent.node_id)
+                .expect(&format!("Unable to find parent: {}", &link.parent));
+            let nodes: Vec<Rc<Node>> = edges.out_edges
+                .iter()
+                .filter(|e| e.edge_type == EdgeType::Derive)
+                .map(|e| Rc::clone(&e.target))
+                .collect();
 
-        for drv_node in nodes {
-            self.add_derive_edge(from, &drv_node);
+            for drv_node in nodes {
+                let derive_edge = Rc::from(Edge::derive(
+                    Rc::clone(&link.node), Rc::clone(&drv_node),
+                ));
+                cycle_edges.push(derive_edge);
+            }
+        }
+
+        // now add the edges
+        for e in cycle_edges {
+            self.add_edge(e);
         }
     }
 }
@@ -410,8 +446,9 @@ impl CfgGraph {
                         // first, check for *cycle*
                         match self.check_cycle(&src_sym_node) {
                             Some(parent_cycle_node) => {
-                                println!("derive nodes from parent: {}", parent_cycle_node);
-                                g_result.add_cycle_derivations(parent_cycle_node, &src_sym_node);
+                                let link = CyclicLink::new(&src_sym_node, parent_cycle_node);
+                                g_result.add_cycle_link(link);
+                                // g_result.add_cycle_derivations(parent_cycle_node, &src_sym_node);
 
                                 // exit this iteration for this alternative
                                 // we don't set prev_node as we are exiting this iteration
@@ -468,6 +505,9 @@ impl CfgGraph {
 
         // start build edges from root rule
         self.build_edge("root", &root_s, &mut g_result);
+
+        // set the cycle links
+        g_result.add_cycle_derivations();
 
         // connect the reduce nodes to root_e
         g_result.update_reductions(&root_e);
@@ -527,6 +567,24 @@ mod tests {
     #[test]
     fn test_cfg_indirect_rec_build_edges() {
         let g = graph("./grammars/rec_indirect.y")
+            .expect("grammar parse failed");
+        let g_result = g.start_edging();
+        println!("\n=> nodes:\n");
+        for n in g_result.nodes {
+            println!("{}", n);
+        }
+        println!("\n=> edges:\n");
+        for e in g_result.edges {
+            println!("{}", e);
+        }
+        for (node_id, in_out) in g_result.node_edge_map.iter() {
+            println!("\n=> node: {}{}", node_id, in_out);
+        }
+    }
+
+    #[test]
+    fn test_cfg_build() {
+        let g = graph("./grammars/medium.y")
             .expect("grammar parse failed");
         let g_result = g.start_edging();
         println!("\n=> nodes:\n");
