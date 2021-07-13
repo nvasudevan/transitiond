@@ -18,16 +18,27 @@ pub(crate) struct Node {
     pub(crate) index: usize,
     /// node id -- debug purposes
     pub(crate) node_id: usize,
+    /// Parent node that this node derived from
+    /// For root node, this is set to None
+    pub(crate) parent_node: Option<Rc<Node>>
 }
 
 impl Node {
-    /// index points to the index of the dot
-    pub(crate) fn new(lhs: &str, item: &Vec<LexSymbol>, index: usize, node_id: usize) -> Self {
+    /// Create a new node with rule `lhs` and the alternative;
+    /// index points to the dot location, and parent_node is the node
+    /// (or non-terminal) from which this node eventually derived.
+    pub(crate) fn new(lhs: &str,
+                      item: &Vec<LexSymbol>,
+                      index: usize,
+                      node_id: usize,
+                      parent_node: Option<Rc<Node>>
+    ) -> Self {
         Self {
             lhs: lhs.to_owned(),
             item: item.clone(),
             index,
             node_id,
+            parent_node
         }
     }
 
@@ -56,7 +67,12 @@ impl fmt::Display for Node {
         let post_s: Vec<String> = post.iter()
             .map(|x| x.to_string()).collect();
 
-        write!(f, "{}", format!("[{}][{}: {}.{}]",
+        let parent_node = match &self.parent_node {
+            Some(p_n) => { p_n.node_id.to_string() },
+            _ => { String::new() }
+        };
+        write!(f, "{}", format!("[{}->{}][{}: {}.{}]",
+                                parent_node,
                                 self.node_id,
                                 self.lhs,
                                 pre_s.join(" "),
@@ -217,16 +233,6 @@ impl GraphResult {
         self.nodes.push(node);
     }
 
-    fn get_node_by_id(&self, node_id: usize) -> Option<&Rc<Node>> {
-        for n in &self.nodes {
-            if n.node_id == node_id {
-                return Some(n);
-            }
-        }
-
-        None
-    }
-
     pub(crate) fn add_edge(&mut self, edge: Rc<Edge>) {
         let src_node = &edge.source;
         let tgt_node = &edge.target;
@@ -290,41 +296,20 @@ impl GraphResult {
         }
     }
 
-    /// Add cycle derivations, so here we don't add the new nodes
-    /// but connect to the existing nodes
-    fn cycle_derivations(&mut self, from: &Rc<Node>, drv_nodes: Vec<Rc<Node>>) {
-        for drv_node in drv_nodes {
-            self.add_derive_edge(from, &drv_node);
-        }
-    }
-
-    /// Return the list of nodes which have derive edges from `node`
-    fn derivations_from(&self, node: &Rc<Node>) -> Vec<Rc<Node>> {
-        let edges = self.node_edge_map.get(&node.node_id)
-            .expect(&format!("Unable to find node: {}", node));
+    /// Add cycle derivations, from `from` node to the derives nodes
+    /// originating from `parent`.
+    fn add_cycle_derivations(&mut self, parent: &Rc<Node>, from: &Rc<Node>) {
+        let edges = self.node_edge_map.get(&parent.node_id)
+            .expect(&format!("Unable to find parent: {}", parent));
         let nodes: Vec<Rc<Node>> = edges.out_edges
             .iter()
             .filter(|e| e.edge_type == EdgeType::Derive)
             .map(|e| Rc::clone(&e.target))
             .collect();
 
-        nodes
-    }
-
-    /// returns the node that edge out to node `node`.
-    fn edges_to(&self, node: &Rc<Node>) -> Option<&Rc<Node>> {
-        for (node_id, in_out) in self.node_edge_map.iter() {
-            for out_edge in &in_out.out_edges {
-                if out_edge.target.node_id == node.node_id {
-                    // node_id == out_edge.source.node_id
-                    let src_node = self.get_node_by_id(*node_id)
-                        .expect("no src node");
-                    return Some(src_node);
-                }
-            }
+        for drv_node in nodes {
+            self.add_derive_edge(from, &drv_node);
         }
-
-        None
     }
 }
 
@@ -346,28 +331,23 @@ impl CfgGraph {
     }
 
     /// Checks for direct cycle (`A: A`) or indirect cycle (`A: B; B: A`).
-    /// Check the parent node first, if matched, return parent (to avoid
-    /// lifetime conflicts we return parent node from g_result)
     /// Keep traversing up the tree to find a matching ancestor node
-    fn check_cycle<'a>(&self, parent: &Rc<Node>, node: &Rc<Node>, g_result: &'a GraphResult) -> Option<&'a Rc<Node>> {
-        if parent.eq(&node) {
-            println!("=> [CYCLE]:: parent: {} <- node: {}", parent, node);
-            return g_result.get_node_by_id(parent.node_id);
-        }
-
-        let mut curr_parent = parent;
+    /// On reaching root node, return None
+    fn check_cycle<'a>(&self, node: &'a Rc<Node>) -> Option<&'a Rc<Node>> {
+        let mut curr_ancestor = &node.parent_node;
         loop {
-            match g_result.edges_to(&curr_parent) {
-                Some(new_parent) => {
-                    if new_parent.eq(&node) {
-                        println!("=> [CYCLE]:: new_parent: {}", new_parent);
-                        return Some(new_parent);
+            match curr_ancestor {
+                Some(ancestor) => {
+                    if ancestor.eq(&node) {
+                        println!("=> [CYCLE]:: parent: {} <- node: {}", ancestor, node);
+                        return Some(ancestor);
                     }
-                    curr_parent = new_parent;
+                    curr_ancestor = &ancestor.parent_node;
                 }
-                _ => { break; }
+                _ => { break }
             }
         }
+
         None
     }
 
@@ -389,7 +369,11 @@ impl CfgGraph {
                     0 => {
                         let src = Rc::new(
                             Node::new(
-                                &rule.lhs, &alt.lex_symbols, i, g_result.inc_node_id(),
+                                &rule.lhs,
+                                &alt.lex_symbols,
+                                i,
+                                g_result.inc_node_id(),
+                                Some(Rc::clone(parent))
                             )
                         );
                         // create the derive edge from the parent
@@ -404,7 +388,11 @@ impl CfgGraph {
                     LexSymbol::Term(_) | LexSymbol::Epsilon(_) => {
                         let tgt_sym_node = Rc::new(
                             Node::new(
-                                &rule.lhs, &alt.lex_symbols, i+1, g_result.inc_node_id(),
+                                &rule.lhs,
+                                &alt.lex_symbols,
+                                i+1,
+                                g_result.inc_node_id(),
+                                Option::from(Rc::clone(parent))
                             )
                         );
                         g_result.add_node(Rc::clone(&tgt_sym_node));
@@ -420,19 +408,12 @@ impl CfgGraph {
                     LexSymbol::NonTerm(nt) => {
                         // if sym is non-terminal, invoke build_edge on it
                         // first, check for *cycle*
-                        match self.check_cycle(parent, &src_sym_node, &g_result) {
+                        match self.check_cycle(&src_sym_node) {
                             Some(parent_cycle_node) => {
                                 println!("derive nodes from parent: {}", parent_cycle_node);
-                                let drv_nodes = g_result.derivations_from(parent_cycle_node);
-                                for drv_node in drv_nodes {
-                                    let drv_edge = Edge::derive(
-                                        Rc::clone(&src_sym_node),
-                                        Rc::clone(&drv_node),
-                                    );
-                                    g_result.add_edge(Rc::from(drv_edge));
-                                }
+                                g_result.add_cycle_derivations(parent_cycle_node, &src_sym_node);
 
-                                // we exit this iteration of symbols for this alternative
+                                // exit this iteration for this alternative
                                 // we don't set prev_node as we are exiting this iteration
                                 // we also don't have reduce nodes, as they will be handled
                                 // by the tree from the drv_nodes.
@@ -442,7 +423,11 @@ impl CfgGraph {
                                 self.build_edge(nt.tok.as_str(), &src_sym_node, &mut g_result);
                                 let tgt_sym_node = Rc::new(
                                     Node::new(
-                                        &rule.lhs, &alt.lex_symbols, i+1, g_result.inc_node_id(),
+                                        &rule.lhs,
+                                        &alt.lex_symbols,
+                                        i+1,
+                                        g_result.inc_node_id(),
+                                        Option::from(Rc::clone(parent))
                                     )
                                 );
                                 g_result.add_node(Rc::clone(&tgt_sym_node));
@@ -469,10 +454,14 @@ impl CfgGraph {
     pub(crate) fn start_edging(&self) -> GraphResult {
         let mut g_result = GraphResult::new();
         let root_item = vec![LexSymbol::NonTerm(NonTermSymbol::new("root".to_owned()))];
-        let root_s_node = Node::new("", &root_item, 0, g_result.node_id());
+        let root_s_node = Node::new(
+            "", &root_item, 0, g_result.node_id(), None
+        );
         let root_s = Rc::new(root_s_node);
 
-        let root_e_node = Node::new("", &root_item, 1, g_result.inc_node_id());
+        let root_e_node = Node::new(
+            "", &root_item, 1, g_result.inc_node_id(), None
+        );
         let root_e = Rc::new(root_e_node);
         g_result.add_node(Rc::clone(&root_s));
         g_result.add_node(Rc::clone(&root_e));
