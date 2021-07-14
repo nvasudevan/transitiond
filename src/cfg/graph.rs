@@ -227,7 +227,7 @@ pub(crate) struct GraphResult {
     pub(crate) node_edge_map: HashMap<usize, InOutEdges>,
     pub(crate) reduce_nodes: Vec<Rc<Node>>,
     pub(crate) cyclic_links: Vec<CyclicLink>,
-    node_id: usize,
+    node_id_counter: usize,
 }
 
 impl GraphResult {
@@ -238,17 +238,17 @@ impl GraphResult {
             node_edge_map: Default::default(),
             reduce_nodes: vec![],
             cyclic_links: vec![],
-            node_id: 0,
+            node_id_counter: 0,
         }
     }
 
     pub(crate) fn node_id(&self) -> usize {
-        self.node_id
+        self.node_id_counter
     }
 
     pub(crate) fn inc_node_id(&mut self) -> usize {
-        self.node_id += 1;
-        self.node_id
+        self.node_id_counter += 1;
+        self.node_id_counter
     }
 
     pub(crate) fn add_node(&mut self, node: Rc<Node>) {
@@ -306,7 +306,7 @@ impl GraphResult {
     }
 
     /// Update reduce edges to `target_node`.
-    pub(crate) fn update_reductions(&mut self, target: &Rc<Node>) {
+    pub(crate) fn add_reductions(&mut self, target: &Rc<Node>) {
         let edges: Vec<Rc<Edge>> = self.reduce_nodes
             .drain(..)
             .map({
@@ -380,14 +380,12 @@ impl CfgGraph {
                     }
                     curr_ancestor = &ancestor.parent_node;
                 }
-                _ => { break }
+                _ => { return None; }
             }
         }
-
-        None
     }
 
-    /// Build edge for given non-terminal `nt`. Using `Y` as the non-terminal,
+    /// Build graph for given non-terminal `nt`. Using `Y` as the non-terminal,
     ///  - `X: P 'q' . Y -> X: P 'q' Y.`
     ///  where rule `Y: 'r'`
     ///  Edges:
@@ -395,7 +393,7 @@ impl CfgGraph {
     ///  - [X: P q . Y]-->[<eps>] [Y: . r] -- derivation
     ///  - [Y: . r] -->[r] [Y: r .] -- shifting terminal `r`
     ///  - [Y: r .] -->[<eps>] [X; P q Y .] -- reduction
-    fn build_edge(&self, nt: &str, parent: &Rc<Node>, mut g_result: &mut GraphResult) {
+    fn build_graph(&self, nt: &str, parent: &Rc<Node>, mut g_result: &mut GraphResult) {
         let rule = self.cfg.get_rule(nt).expect("No such rule");
         let mut reduce_nodes: Vec<Rc<Node>> = vec![];
         for alt in &rule.rhs {
@@ -446,9 +444,9 @@ impl CfgGraph {
                         // first, check for *cycle*
                         match self.check_cycle(&src_sym_node) {
                             Some(parent_cycle_node) => {
-                                let link = CyclicLink::new(&src_sym_node, parent_cycle_node);
-                                g_result.add_cycle_link(link);
-                                // g_result.add_cycle_derivations(parent_cycle_node, &src_sym_node);
+                                g_result.add_cycle_link(
+                                    CyclicLink::new(&src_sym_node, parent_cycle_node)
+                                );
 
                                 // exit this iteration for this alternative
                                 // we don't set prev_node as we are exiting this iteration
@@ -457,7 +455,7 @@ impl CfgGraph {
                                 break;
                             }
                             _ => {
-                                self.build_edge(nt.tok.as_str(), &src_sym_node, &mut g_result);
+                                self.build_graph(nt.tok.as_str(), &src_sym_node, &mut g_result);
                                 let tgt_sym_node = Rc::new(
                                     Node::new(
                                         &rule.lhs,
@@ -468,7 +466,7 @@ impl CfgGraph {
                                     )
                                 );
                                 g_result.add_node(Rc::clone(&tgt_sym_node));
-                                g_result.update_reductions(&tgt_sym_node);
+                                g_result.add_reductions(&tgt_sym_node);
 
                                 if i == alt.lex_symbols.len() - 1 {
                                     reduce_nodes.push(Rc::clone(&tgt_sym_node));
@@ -487,8 +485,8 @@ impl CfgGraph {
         g_result.reduce_nodes.append(&mut reduce_nodes);
     }
 
-    /// Create the two root edges `[:.root]` and `[:root.]` and start building edges.
-    pub(crate) fn start_edging(&self) -> GraphResult {
+    /// Instantiate the graph from the root nodes: `[:.root]`, `[:root.]`
+    pub(crate) fn instantiate(&self) -> GraphResult {
         let mut g_result = GraphResult::new();
         let root_item = vec![LexSymbol::NonTerm(NonTermSymbol::new("root".to_owned()))];
         let root_s_node = Node::new(
@@ -504,13 +502,13 @@ impl CfgGraph {
         g_result.add_node(Rc::clone(&root_e));
 
         // start build edges from root rule
-        self.build_edge("root", &root_s, &mut g_result);
+        self.build_graph("root", &root_s, &mut g_result);
 
         // set the cycle links
         g_result.add_cycle_derivations();
 
         // connect the reduce nodes to root_e
-        g_result.update_reductions(&root_e);
+        g_result.add_reductions(&root_e);
 
         g_result
     }
@@ -532,7 +530,7 @@ mod tests {
     fn test_cfg_build_edges() {
         let g = graph("./grammars/simple.y")
             .expect("grammar parse failed");
-        let g_result = g.start_edging();
+        let g_result = g.instantiate();
         println!("\n=> nodes:\n");
         for n in g_result.nodes {
             println!("n: {}", n);
@@ -550,7 +548,7 @@ mod tests {
     fn test_cfg_rec_build_edges() {
         let g = graph("./grammars/rec_direct.y")
             .expect("grammar parse failed");
-        let g_result = g.start_edging();
+        let g_result = g.instantiate();
         println!("\n=> nodes:\n");
         for n in g_result.nodes {
             println!("{}", n);
@@ -568,7 +566,7 @@ mod tests {
     fn test_cfg_indirect_rec_build_edges() {
         let g = graph("./grammars/rec_indirect.y")
             .expect("grammar parse failed");
-        let g_result = g.start_edging();
+        let g_result = g.instantiate();
         println!("\n=> nodes:\n");
         for n in g_result.nodes {
             println!("{}", n);
@@ -586,7 +584,7 @@ mod tests {
     fn test_cfg_build() {
         let g = graph("./grammars/medium.y")
             .expect("grammar parse failed");
-        let g_result = g.start_edging();
+        let g_result = g.instantiate();
         println!("\n=> nodes:\n");
         for n in g_result.nodes {
             println!("{}", n);
