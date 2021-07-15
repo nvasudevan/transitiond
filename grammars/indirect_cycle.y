@@ -4,7 +4,7 @@
 %%
 root: 'a' A 'b' B
 ;
-A: 'b' | 'c' B
+A: 'b' | B 'c'
 ;
 B: 'c' | 'a' A
 ;

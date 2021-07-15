@@ -1,6 +1,6 @@
 use std::fmt;
 
-// mod diagram;
+mod diagram;
 mod parse;
 mod graph;
 
@@ -102,6 +102,10 @@ impl PartialEq for EpsilonSymbol {
     }
 }
 
+/// LexSymbol can be of three types:
+/// - a non-terminal (`NonTerm`)
+/// - a terminal (`Term`)
+/// - an epsilon (`Epsilon`)
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) enum LexSymbol {
     NonTerm(NonTermSymbol),
@@ -287,15 +291,3 @@ impl Cfg {
         alts
     }
 }
-
-// impl From<&str> for Cfg {
-//     fn from(p: &str) -> Self {
-//         let s = fs::read_to_string(p)
-//             .expect("Unable to read grammar file");
-//         let s_chars: Vec<char> = s.chars().into_iter().collect();
-//         let mut cfg_parser = CfgParser::new(s_chars);
-//         let cfg = cfg_parser.run().expect("Run failed!");
-//
-//         cfg
-//     }
-// }

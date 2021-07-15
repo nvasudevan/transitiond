@@ -7,6 +7,18 @@ use crate::cfg::{Cfg, EpsilonSymbol, LexSymbol, NonTermSymbol, parse};
 use crate::cfg::parse::CfgParseError;
 use std::collections::HashMap;
 
+#[derive(Debug)]
+pub(crate) struct CfgToGraphError {
+    msg: String
+}
+
+impl CfgToGraphError {
+    fn new(msg: String) -> Self {
+        CfgToGraphError {
+            msg
+        }
+    }
+}
 /// Represents a Cfg graph node/vertex
 #[derive(Debug, Clone)]
 pub(crate) struct Node {
@@ -200,6 +212,7 @@ impl fmt::Display for InOutEdges {
     }
 }
 
+#[derive(Debug)]
 pub(crate) struct CyclicLink {
     pub(crate) node: Rc<Node>,
     pub(crate) parent: Rc<Node>
@@ -249,6 +262,16 @@ impl GraphResult {
     pub(crate) fn inc_node_id(&mut self) -> usize {
         self.node_id_counter += 1;
         self.node_id_counter
+    }
+
+    pub(crate) fn get_node_by_id(&self, node_id: usize) -> Option<&Rc<Node>> {
+        for n in &self.nodes {
+            if n.node_id == node_id {
+                return Some(n);
+            }
+        }
+
+        None
     }
 
     pub(crate) fn add_node(&mut self, node: Rc<Node>) {
@@ -323,11 +346,13 @@ impl GraphResult {
     }
 
     /// Add cycle derivations from `cyclic_links`
-    fn add_cycle_derivations(&mut self) {
+    fn add_cycle_derivations(&mut self) -> Result<(), CfgToGraphError> {
         let mut cycle_edges = Vec::<Rc<Edge>>::new();
         for link in &self.cyclic_links {
             let edges = self.node_edge_map.get(&link.parent.node_id)
-                .expect(&format!("Unable to find parent: {}", &link.parent));
+                .ok_or_else(||
+                    CfgToGraphError::new(format!("Unable to find parent: {}", &link.parent))
+                )?;
             let nodes: Vec<Rc<Node>> = edges.out_edges
                 .iter()
                 .filter(|e| e.edge_type == EdgeType::Derive)
@@ -346,6 +371,8 @@ impl GraphResult {
         for e in cycle_edges {
             self.add_edge(e);
         }
+
+        Ok(())
     }
 }
 
@@ -393,8 +420,12 @@ impl CfgGraph {
     ///  - [X: P q . Y]-->[<eps>] [Y: . r] -- derivation
     ///  - [Y: . r] -->[r] [Y: r .] -- shifting terminal `r`
     ///  - [Y: r .] -->[<eps>] [X; P q Y .] -- reduction
-    fn build_graph(&self, nt: &str, parent: &Rc<Node>, mut g_result: &mut GraphResult) {
-        let rule = self.cfg.get_rule(nt).expect("No such rule");
+    fn build_graph(&self, nt: &str, parent: &Rc<Node>, mut g_result: &mut GraphResult)
+        -> Result<(), CfgToGraphError> {
+        let rule = self.cfg.get_rule(nt)
+            .ok_or_else(||
+                CfgToGraphError::new(format!("Unable to get rule for non-terminal {}", nt))
+            )?;
         let mut reduce_nodes: Vec<Rc<Node>> = vec![];
         for alt in &rule.rhs {
             let mut prev_node = Rc::clone(&parent);
@@ -455,7 +486,10 @@ impl CfgGraph {
                                 break;
                             }
                             _ => {
-                                self.build_graph(nt.tok.as_str(), &src_sym_node, &mut g_result);
+                                self.build_graph(
+                                    nt.tok.as_str(),
+                                    &src_sym_node,
+                                    &mut g_result)?;
                                 let tgt_sym_node = Rc::new(
                                     Node::new(
                                         &rule.lhs,
@@ -483,10 +517,12 @@ impl CfgGraph {
 
         // now we are ready to append the reduce nodes
         g_result.reduce_nodes.append(&mut reduce_nodes);
+
+        Ok(())
     }
 
     /// Instantiate the graph from the root nodes: `[:.root]`, `[:root.]`
-    pub(crate) fn instantiate(&self) -> GraphResult {
+    pub(crate) fn instantiate(&self) -> Result<GraphResult, CfgToGraphError> {
         let mut g_result = GraphResult::new();
         let root_item = vec![LexSymbol::NonTerm(NonTermSymbol::new("root".to_owned()))];
         let root_s_node = Node::new(
@@ -502,15 +538,15 @@ impl CfgGraph {
         g_result.add_node(Rc::clone(&root_e));
 
         // start build edges from root rule
-        self.build_graph("root", &root_s, &mut g_result);
+        self.build_graph("root", &root_s, &mut g_result)?;
 
         // set the cycle links
-        g_result.add_cycle_derivations();
+        g_result.add_cycle_derivations()?;
 
         // connect the reduce nodes to root_e
         g_result.add_reductions(&root_e);
 
-        g_result
+        Ok(g_result)
     }
 }
 
@@ -524,31 +560,99 @@ pub(crate) fn graph(cfgp: &str) -> Result<CfgGraph, CfgParseError> {
 
 #[cfg(test)]
 mod tests {
-    use crate::cfg::graph::graph;
+    use crate::cfg::graph::{graph, EdgeType};
+    use crate::cfg::{LexSymbol, EpsilonSymbol};
 
     #[test]
-    fn test_cfg_build_edges() {
+    fn test_cfg_simple() {
         let g = graph("./grammars/simple.y")
             .expect("grammar parse failed");
-        let g_result = g.instantiate();
+        let g_result = g.instantiate()
+            .expect("Unable to convert cfg to graph");
         println!("\n=> nodes:\n");
-        for n in g_result.nodes {
-            println!("n: {}", n);
+        for n in &g_result.nodes {
+            println!("{}", n);
         }
         println!("\n=> edges:\n");
-        for e in g_result.edges {
-            println!("e: {}", e);
+        for e in &g_result.edges {
+            println!("{}", e);
         }
-        for (node_id, in_out) in g_result.node_edge_map.iter() {
-            println!("\n=> node: {}{}", node_id, in_out);
-        }
+        let root_derivations = g_result.node_edge_map.get(&0)
+            .expect("No derivations from root non-terminal found!");
+        let root_out = &root_derivations.out_edges;
+
+        // assert that the root edges are derive types
+        assert_eq!(root_out[0].edge_type, EdgeType::Derive);
+        assert_eq!(root_out[1].edge_type, EdgeType::Derive);
+
+        // check for two derive nodes (2 and 10) from root
+        let derive_0 = &root_out[0].target;
+        let derive_1 = &root_out[1].target;
+
+        let node_2 = g_result.get_node_by_id(2)
+            .expect("Unable to get first derive node from root");
+        assert_eq!(derive_0, node_2);
+        let node_10 = g_result.get_node_by_id(10)
+            .expect("Unable to get second derive node from root");
+        assert_eq!(derive_1, node_10);
+
+        // node 6 is empty alternative
+        let node_6 = g_result.get_node_by_id(6)
+            .expect("Unable to get node 6 from root");
+        assert_eq!(node_6.lhs, "A");
+        let eps_tok = LexSymbol::Epsilon(EpsilonSymbol::new());
+        assert_eq!(node_6.item[0], eps_tok);
     }
 
     #[test]
-    fn test_cfg_rec_build_edges() {
-        let g = graph("./grammars/rec_direct.y")
+    fn test_cfg_direct_cycle() {
+        let g = graph("./grammars/direct_cycle.y")
             .expect("grammar parse failed");
-        let g_result = g.instantiate();
+        let g_result = g.instantiate()
+            .expect("Unable to convert cfg to graph");
+        println!("\n=> nodes:\n");
+        for n in &g_result.nodes {
+            println!("{}", n);
+        }
+        println!("\n=> edges:\n");
+        for e in &g_result.edges {
+            println!("{}", e);
+        }
+
+        // node 11 -> node 7 form a cycle
+        let node_7 = g_result.get_node_by_id(7)
+            .expect("Unable to get node 6 from root");
+        let node_11 = g_result.get_node_by_id(11)
+            .expect("Unable to get node 6 from root");
+        assert_eq!(&g_result.cyclic_links[0].node, node_11);
+        assert_eq!(&g_result.cyclic_links[0].parent, node_7);
+
+        // assert that there are derive edges from node 11 to node 8 and 10
+        let node_11_derivations = g_result.node_edge_map.get(&11)
+            .expect("No derivations from node 11 found!");
+        let node_11_out = &node_11_derivations.out_edges;
+
+        // assert that the root edges are derive types
+        assert_eq!(node_11_out[0].edge_type, EdgeType::Derive);
+        assert_eq!(node_11_out[1].edge_type, EdgeType::Derive);
+
+        let derive_to_node_8 = &node_11_out[0].target;
+        let derive_to_node_10 = &node_11_out[1].target;
+
+        let node_8 = g_result.get_node_by_id(8)
+            .expect("Unable to get first derive node from root");
+        assert_eq!(derive_to_node_8, node_8);
+        let node_10 = g_result.get_node_by_id(10)
+            .expect("Unable to get second derive node from root");
+        assert_eq!(derive_to_node_10, node_10);
+    }
+
+    #[test]
+    fn test_cfg_indirect_cycle() {
+        let g = graph("./grammars/indirect_cycle.y")
+            .expect("grammar parse failed");
+        let g_result = g.instantiate()
+            .expect("Unable to convert cfg to graph");
         println!("\n=> nodes:\n");
         for n in g_result.nodes {
             println!("{}", n);
@@ -563,28 +667,11 @@ mod tests {
     }
 
     #[test]
-    fn test_cfg_indirect_rec_build_edges() {
-        let g = graph("./grammars/rec_indirect.y")
-            .expect("grammar parse failed");
-        let g_result = g.instantiate();
-        println!("\n=> nodes:\n");
-        for n in g_result.nodes {
-            println!("{}", n);
-        }
-        println!("\n=> edges:\n");
-        for e in g_result.edges {
-            println!("{}", e);
-        }
-        for (node_id, in_out) in g_result.node_edge_map.iter() {
-            println!("\n=> node: {}{}", node_id, in_out);
-        }
-    }
-
-    #[test]
-    fn test_cfg_build() {
+    fn test_medium_sized_cfg() {
         let g = graph("./grammars/medium.y")
             .expect("grammar parse failed");
-        let g_result = g.instantiate();
+        let g_result = g.instantiate()
+            .expect("Unable to convert cfg to graph");
         println!("\n=> nodes:\n");
         for n in g_result.nodes {
             println!("{}", n);
