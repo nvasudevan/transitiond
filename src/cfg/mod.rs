@@ -3,6 +3,7 @@ use std::fmt;
 mod diagram;
 mod parse;
 mod graph;
+mod mutate;
 
 #[derive(Debug, Copy, Clone, PartialEq)]
 pub(crate) enum SymType {
@@ -129,7 +130,7 @@ impl fmt::Display for LexSymbol {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(crate) struct RuleAlt {
     lex_symbols: Vec<LexSymbol>,
 }
@@ -166,7 +167,7 @@ impl RuleAlt {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(crate) struct CfgRule {
     lhs: String,
     rhs: Vec<RuleAlt>,
@@ -187,6 +188,15 @@ impl fmt::Display for CfgRule {
     }
 }
 
+impl PartialEq for CfgRule {
+    fn eq(&self, other: &Self) -> bool {
+        if self.to_string().eq(&other.to_string()) {
+            return true;
+        }
+        false
+    }
+}
+
 impl CfgRule {
     pub(crate) fn new(lhs: String, rhs: Vec<RuleAlt>) -> Self {
         Self {
@@ -196,7 +206,7 @@ impl CfgRule {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(crate) struct Cfg {
     rules: Vec<CfgRule>,
 }
@@ -215,6 +225,15 @@ impl fmt::Display for Cfg {
     }
 }
 
+impl PartialEq for Cfg {
+    fn eq(&self, other: &Self) -> bool {
+        if self.to_string().eq(&other.to_string()) {
+            return true;
+        }
+        false
+    }
+}
+
 impl Cfg {
     pub(crate) fn new(rules: Vec<CfgRule>) -> Self {
         Self {
@@ -226,6 +245,17 @@ impl Cfg {
         for r in &self.rules {
             if r.lhs.eq(name) {
                 return Some(r);
+            }
+        }
+
+        None
+    }
+
+    pub(crate) fn get_alt_mut(&mut self, name: &str, alt_index: usize) -> Option<&mut RuleAlt> {
+        for r in &mut self.rules {
+            if r.lhs.eq(name) {
+                let mut alt = &mut r.rhs[alt_index];
+                return Some(alt);
             }
         }
 

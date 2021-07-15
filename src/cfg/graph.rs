@@ -668,7 +668,7 @@ mod tests {
 
     #[test]
     fn test_medium_sized_cfg() {
-        let g = graph("./grammars/medium.y")
+        let g = graph("./grammars/lr1.y")
             .expect("grammar parse failed");
         let g_result = g.instantiate()
             .expect("Unable to convert cfg to graph");
