@@ -19,6 +19,7 @@ impl CfgToGraphError {
         }
     }
 }
+
 /// Represents a Cfg graph node/vertex
 #[derive(Debug, Clone)]
 pub(crate) struct Node {

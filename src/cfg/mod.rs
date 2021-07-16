@@ -1,4 +1,5 @@
 use std::fmt;
+use std::convert::TryFrom;
 
 mod diagram;
 mod parse;
@@ -130,6 +131,28 @@ impl fmt::Display for LexSymbol {
     }
 }
 
+impl LexSymbol {
+    fn to_term(&self) -> Option<&TermSymbol> {
+        match self {
+            LexSymbol::Term(t) => {
+                Some(t)
+            },
+            _ => { None }
+        }
+    }
+}
+
+impl TryFrom<LexSymbol> for TermSymbol {
+    type Error = ();
+
+    fn try_from(value: LexSymbol) -> Result<Self, Self::Error> {
+        match value {
+            LexSymbol::Term(t) => { Ok(t) },
+            _ => { Err(()) }
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub(crate) struct RuleAlt {
     lex_symbols: Vec<LexSymbol>,
@@ -241,6 +264,24 @@ impl Cfg {
         }
     }
 
+    pub(crate) fn terminals(&self) -> Vec<&TermSymbol> {
+        let mut terms: Vec<&TermSymbol> = vec![];
+        for rule in &self.rules {
+            for alt in &rule.rhs {
+                for sym in &alt.lex_symbols {
+                    if let LexSymbol::Term(t) = sym {
+                        if ! terms.contains(&t) {
+                            terms.push(t);
+                        }
+                    }
+                }
+            }
+        }
+
+        terms
+    }
+
+
     pub(crate) fn get_rule(&self, name: &str) -> Option<&CfgRule> {
         for r in &self.rules {
             if r.lhs.eq(name) {
@@ -254,7 +295,7 @@ impl Cfg {
     pub(crate) fn get_alt_mut(&mut self, name: &str, alt_index: usize) -> Option<&mut RuleAlt> {
         for r in &mut self.rules {
             if r.lhs.eq(name) {
-                let mut alt = &mut r.rhs[alt_index];
+                let alt = &mut r.rhs[alt_index];
                 return Some(alt);
             }
         }
