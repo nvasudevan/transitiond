@@ -94,7 +94,9 @@ fn run(base_cfg: &Cfg, cnt: usize) -> Result<Vec<Cfg>, CfgMutateError> {
         mutate_alt(&mut nt_alt, &terms)?;
         println!("alt: {}: {}", nt, nt_alt);
         println!("cfg: {}", cfg);
-        mutated_cfgs.push(cfg);
+        if ! mutated_cfgs.contains(&cfg) {
+            mutated_cfgs.push(cfg);
+        }
 
         i += 1;
         if i >= cnt {
