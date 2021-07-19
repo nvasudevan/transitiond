@@ -26,7 +26,7 @@ pub(crate) struct CfgMutation<'a> {
     cfg: &'a Cfg,
     terminal_indices: HashMap<String, Vec<Vec<usize>>>,
     non_terms: Vec<String>,
-    terms: Vec<&'a TermSymbol>
+    terms: Vec<&'a TermSymbol>,
 }
 
 impl<'a> CfgMutation<'a> {
@@ -35,7 +35,7 @@ impl<'a> CfgMutation<'a> {
             cfg,
             terminal_indices: Default::default(),
             non_terms: vec![],
-            terms: vec![]
+            terms: vec![],
         }
     }
 
@@ -44,7 +44,7 @@ impl<'a> CfgMutation<'a> {
         let mut term_indices_map: HashMap<String, Vec<Vec<usize>>> = HashMap::new();
         for rule in &self.cfg.rules {
             let mut rule_i: Vec<Vec<usize>> = vec![];
-            for (i, alt) in rule.rhs.iter().enumerate() {
+            for alt in &rule.rhs {
                 let mut alt_i: Vec<usize> = vec![];
                 for (j, sym) in alt.lex_symbols.iter().enumerate() {
                     if let LexSymbol::Term(_) = sym {
@@ -110,7 +110,7 @@ impl<'a> CfgMutation<'a> {
         let nt = self.non_terms.choose(&mut thread_rng()).unwrap();
         let (alt_i, term_j) = self.alt_with_terminals(&nt);
         let mut cfg = self.cfg.clone();
-        let mut alt = cfg.get_alt_mut(nt, alt_i)
+        let alt = cfg.get_alt_mut(nt, alt_i)
             .ok_or_else(||
                 CfgMutateError::new(
                     format!("Failed to get alternative for non-terminal {} (index: {})",
@@ -136,11 +136,7 @@ impl<'a> CfgMutation<'a> {
     }
 }
 
-fn run(base_cfg: &Cfg) -> Result<Vec<Cfg>, CfgMutateError> {
-    let mut cfg_mut = CfgMutation::new(base_cfg);
-    cfg_mut.instantiate();
-
-    let cnt = cfg_mut.mut_cnt() * (cfg_mut.terms.len() - 1);
+fn run(cfg_mut: &mut CfgMutation, cnt: usize) -> Result<Vec<Cfg>, CfgMutateError> {
     let mut mutated_cfgs: Vec<Cfg> = vec![];
     let mut i: usize = 0;
     loop {
@@ -154,7 +150,7 @@ fn run(base_cfg: &Cfg) -> Result<Vec<Cfg>, CfgMutateError> {
         std::io::stdout().flush().unwrap();
 
         i += 1;
-        if (i >= MAX_ITER_CNT)  {
+        if (i >= MAX_ITER_CNT) || (mutated_cfgs.len() >= cnt) {
             break;
         }
     }
@@ -164,23 +160,32 @@ fn run(base_cfg: &Cfg) -> Result<Vec<Cfg>, CfgMutateError> {
 
 #[cfg(test)]
 mod tests {
-    use crate::cfg::mutate::run;
+    use crate::cfg::mutate::{run, CfgMutation};
     use crate::cfg::parse;
     use std::path::Path;
+    use crate::cfg::graph::graph;
 
     #[test]
-    fn test_single_mutation() {
+    fn test_cfg_mutation() {
         let cfg = parse::parse("./grammars/lr1.y")
             .expect("Unable to parse as a cfg");
-        let cnt: usize = 3;
-        let cfgs = run(&cfg)
+        let mut cfg_mut = CfgMutation::new(&cfg);
+        cfg_mut.instantiate();
+        let cnt = cfg_mut.mut_cnt() * (cfg_mut.terms.len() - 1);
+        let cfgs = run(&mut cfg_mut, cnt)
             .expect("Unable to generate a mutated cfg");
         println!("\n=> generated {} cfgs, writing ...", cfgs.len());
         let basep = Path::new("/var/tmp/cfgtest");
+
         for (i, cfg) in cfgs.iter().enumerate() {
-            println!("cfg:\n{}", cfg);
-            std::fs::write(basep.join(i.to_string()), cfg.to_string())
+            let cfgp = basep.join(i.to_string());
+            std::fs::write(&cfgp, cfg.as_yacc())
                 .expect(&format!("Failed to write cfg {}", cfg));
+            let g = graph(cfgp.to_str().unwrap())
+                .expect("Unable to create graph");
+            let g_result = g.instantiate()
+                .expect("Unable to convert cfg to graph");
+            println!("=>graph: {}", g_result);
         }
     }
 }

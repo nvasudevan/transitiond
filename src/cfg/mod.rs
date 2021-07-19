@@ -239,7 +239,7 @@ impl fmt::Display for Cfg {
         let mut s = String::new();
         let mut rules_iter = self.rules.iter();
         if let Some(start_rule) = rules_iter.next() {
-            s = format!("{}\n;\n", start_rule);
+            s = format!("{}\n\n{}\n;\n", s, start_rule);
             for rule in rules_iter {
                 s = format!("{}{}\n;\n", s, rule);
             }
@@ -264,6 +264,16 @@ impl Cfg {
         }
     }
 
+    pub(crate) fn as_yacc(&self) -> String {
+        let start_rule = self.get_rule("root")
+            .expect("No start rule found!");
+        let mut s = format!("%define lr.type canonical-lr\n%start {}\n%%",
+                            start_rule.lhs);
+        s = format!("{}\n{}", s, self);
+
+        format!("{}\n\n%%\n", s)
+    }
+
     pub(crate) fn terminals(&self) -> Vec<&TermSymbol> {
         let mut terms: Vec<&TermSymbol> = vec![];
         for rule in &self.rules {
@@ -280,7 +290,6 @@ impl Cfg {
 
         terms
     }
-
 
     pub(crate) fn get_rule(&self, name: &str) -> Option<&CfgRule> {
         for r in &self.rules {

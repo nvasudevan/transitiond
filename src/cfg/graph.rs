@@ -375,6 +375,31 @@ impl GraphResult {
 
         Ok(())
     }
+
+    fn print_graph(&self) {
+        println!("\n=> nodes:\n");
+        for n in &self.nodes {
+            println!("{}", n);
+        }
+        println!("\n=> edges:\n");
+        for e in &self.edges {
+            println!("{}", e);
+        }
+        println!("\n=> node in/out edges:\n");
+        for (node_id, in_out) in self.node_edge_map.iter() {
+            println!("\n=> node: {}{}", node_id, in_out);
+        }
+    }
+}
+
+impl fmt::Display for GraphResult {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let s = format!("total (nodes: {}, edges: {})",
+                        self.nodes.len(),
+                        self.edges.len()
+        );
+        write!(f, "{}", s)
+    }
 }
 
 /// Represents a CFG graph
@@ -403,7 +428,7 @@ impl CfgGraph {
             match curr_ancestor {
                 Some(ancestor) => {
                     if ancestor.eq(&node) {
-                        println!("=> [CYCLE]:: parent: {} <- node: {}", ancestor, node);
+                        // println!("=> [CYCLE]:: parent: {} <- node: {}", ancestor, node);
                         return Some(ancestor);
                     }
                     curr_ancestor = &ancestor.parent_node;
@@ -553,7 +578,6 @@ impl CfgGraph {
 
 pub(crate) fn graph(cfgp: &str) -> Result<CfgGraph, CfgParseError> {
     let cfg = parse::parse(cfgp)?;
-    println!("cfg:\n{}", cfg);
     let graph = CfgGraph::new(cfg);
 
     Ok(graph)
@@ -570,14 +594,6 @@ mod tests {
             .expect("grammar parse failed");
         let g_result = g.instantiate()
             .expect("Unable to convert cfg to graph");
-        println!("\n=> nodes:\n");
-        for n in &g_result.nodes {
-            println!("{}", n);
-        }
-        println!("\n=> edges:\n");
-        for e in &g_result.edges {
-            println!("{}", e);
-        }
         let root_derivations = g_result.node_edge_map.get(&0)
             .expect("No derivations from root non-terminal found!");
         let root_out = &root_derivations.out_edges;
@@ -611,14 +627,6 @@ mod tests {
             .expect("grammar parse failed");
         let g_result = g.instantiate()
             .expect("Unable to convert cfg to graph");
-        println!("\n=> nodes:\n");
-        for n in &g_result.nodes {
-            println!("{}", n);
-        }
-        println!("\n=> edges:\n");
-        for e in &g_result.edges {
-            println!("{}", e);
-        }
 
         // node 11 -> node 7 form a cycle
         let node_7 = g_result.get_node_by_id(7)
@@ -654,17 +662,7 @@ mod tests {
             .expect("grammar parse failed");
         let g_result = g.instantiate()
             .expect("Unable to convert cfg to graph");
-        println!("\n=> nodes:\n");
-        for n in g_result.nodes {
-            println!("{}", n);
-        }
-        println!("\n=> edges:\n");
-        for e in g_result.edges {
-            println!("{}", e);
-        }
-        for (node_id, in_out) in g_result.node_edge_map.iter() {
-            println!("\n=> node: {}{}", node_id, in_out);
-        }
+        g_result.print_graph();
     }
 
     #[test]
@@ -673,16 +671,6 @@ mod tests {
             .expect("grammar parse failed");
         let g_result = g.instantiate()
             .expect("Unable to convert cfg to graph");
-        println!("\n=> nodes:\n");
-        for n in g_result.nodes {
-            println!("{}", n);
-        }
-        println!("\n=> edges:\n");
-        for e in g_result.edges {
-            println!("{}", e);
-        }
-        for (node_id, in_out) in g_result.node_edge_map.iter() {
-            println!("\n=> node: {}{}", node_id, in_out);
-        }
+        g_result.print_graph();
     }
 }

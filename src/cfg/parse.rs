@@ -79,7 +79,6 @@ impl CfgParser {
     /// - %start - marks the start rule part
     /// - %% - has two of these, marks the begin and end of rules section.
     fn header_directives(&mut self, i: usize) -> Result<usize, CfgParseError> {
-        println!("=> parsing headers");
         lazy_static! {
             static ref RE_HEADER: Regex = Regex::new(
             r"[\n\r\s]*%[a-zA-Z]+\s+([a-zA-Z\.]+)\s+([a-zA-Z\-]+)[\n\r\s]+%[a-zA-Z]+\s+(?P<start>[a-zA-Z]+)[\n\r\s]+%%"
@@ -124,7 +123,6 @@ impl CfgParser {
 
     /// Parses the footer `%%` section, thus marking the end of parsing
     fn footer_tag(&self, i: usize) -> Result<(), CfgParseError> {
-        println!("=> parsing footer %%");
         lazy_static! {
             static ref RE_FOOTER: Regex = Regex::new( r"[\n\r\s]*%%")
             .expect("Unable to create RE_FOOTER regex");
@@ -253,7 +251,6 @@ impl CfgParser {
     /// Parses the rules section between the `%%` markers
     /// First read the root rule and then parse the rest of the rules
     fn parse_rules(&mut self, i: usize) -> Result<(usize, Vec<CfgRule>), CfgParseError> {
-        println!("=> parsing rules");
         let s_chars = self.tokens.as_slice();
         let mut j = i;
         let mut rules: Vec<CfgRule> = vec![];
