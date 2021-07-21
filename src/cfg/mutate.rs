@@ -7,7 +7,7 @@ use rand::thread_rng;
 use crate::cfg::{Cfg, LexSymbol, TermSymbol};
 use std::io::Write;
 
-const MAX_ITER_CNT: usize = 500;
+const MAX_ITER_LIMIT: usize = 500;
 
 #[derive(Debug)]
 pub(crate) struct CfgMutateError {
@@ -26,11 +26,11 @@ pub(crate) struct CfgMutation<'a> {
     cfg: &'a Cfg,
     terminal_indices: HashMap<String, Vec<Vec<usize>>>,
     non_terms: Vec<String>,
-    terms: Vec<&'a TermSymbol>,
+    pub(crate) terms: Vec<&'a TermSymbol>,
 }
 
 impl<'a> CfgMutation<'a> {
-    fn new(cfg: &'a Cfg) -> Self {
+    pub(crate) fn new(cfg: &'a Cfg) -> Self {
         Self {
             cfg,
             terminal_indices: Default::default(),
@@ -73,14 +73,14 @@ impl<'a> CfgMutation<'a> {
         self.non_terms = keys;
     }
 
-    fn instantiate(&mut self) {
+    pub(crate) fn instantiate(&mut self) {
         self.terminal_indices();
         self.nt_alt_with_terminals();
         self.terms = self.cfg.terminals();
     }
 
     /// Returns the number of possible mutations where terminals occur
-    fn mut_cnt(&self) -> usize {
+    pub(crate) fn mut_cnt(&self) -> usize {
         self.terminal_indices.values()
             .map(|u|
                 u.iter().map(|v| v.len()).sum::<usize>()
@@ -136,7 +136,9 @@ impl<'a> CfgMutation<'a> {
     }
 }
 
-fn run(cfg_mut: &mut CfgMutation, cnt: usize) -> Result<Vec<Cfg>, CfgMutateError> {
+/// Start a mutation run until we generate the `cnt` mutated grammars
+/// or hit the `MAX_ITER_LIMIT` threshold.
+pub(crate) fn run(cfg_mut: &mut CfgMutation, cnt: usize) -> Result<Vec<Cfg>, CfgMutateError> {
     let mut mutated_cfgs: Vec<Cfg> = vec![];
     let mut i: usize = 0;
     loop {
@@ -150,7 +152,7 @@ fn run(cfg_mut: &mut CfgMutation, cnt: usize) -> Result<Vec<Cfg>, CfgMutateError
         std::io::stdout().flush().unwrap();
 
         i += 1;
-        if (i >= MAX_ITER_CNT) || (mutated_cfgs.len() >= cnt) {
+        if (i >= MAX_ITER_LIMIT) || (mutated_cfgs.len() >= cnt) {
             break;
         }
     }

@@ -5,6 +5,7 @@ mod diagram;
 mod parse;
 mod graph;
 mod mutate;
+mod dataset;
 
 #[derive(Debug, Copy, Clone, PartialEq)]
 pub(crate) enum SymType {

@@ -55,7 +55,7 @@ impl Node {
         }
     }
 
-    pub(crate) fn item_string(&self) -> String {
+    pub(crate) fn min_item_string(&self) -> String {
         let pre = self.item.get(0..self.index)
             .expect("fail to retrieve items");
         let pre_s: Vec<String> = pre.iter()
@@ -65,7 +65,11 @@ impl Node {
         let post_s: Vec<String> = post.iter()
             .map(|x| x.to_string()).collect();
 
-        format!("[{}: {}.{}]", self.lhs, pre_s.join(" "), post_s.join(" "))
+        format!("{}: {}.{}", self.lhs, pre_s.join(" "), post_s.join(" "))
+    }
+
+    pub(crate) fn item_string(&self) -> String {
+        format!("[{}]", self.min_item_string())
     }
 }
 
