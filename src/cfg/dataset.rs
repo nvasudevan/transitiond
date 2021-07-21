@@ -24,7 +24,7 @@ pub(crate) struct CfgData {
     /// Graph associated with the grammar
     graph: GraphResult,
     /// label: 0 indicates grammar is unambiguous; 1 is ambiguous
-    label: bool
+    label: usize
 }
 
 impl CfgData {
@@ -32,7 +32,7 @@ impl CfgData {
         Self {
             cfg,
             graph,
-            label: false
+            label: 0
         }
     }
 }
@@ -66,10 +66,8 @@ impl CfgDataSet {
         }
     }
 
-    /// n - total no of nodes
-    /// m - total no of edges
     /// CFG_node_labels.txt - `i`th line indicates the node label of the `i`th node
-    fn persist(&self, data_dir: &Path) -> Result<(), CfgDataSetError> {
+    fn write_node_labels(&self, data_dir: &Path) -> Result<(), CfgDataSetError> {
         println!("total unique nodes: {}", &self.node_ids_map.keys().len());
         let mut node_labels: Vec<String> = vec![];
         for cfg in &self.cfg_data {
@@ -86,14 +84,43 @@ impl CfgDataSet {
             }
         }
 
-        let node_ids_file = data_dir.join("node_ids.txt");
+        let node_ids_file = data_dir.join("CFG_node_labels.txt");
         let node_labels_s = node_labels.join("\n");
         std::fs::write(node_ids_file, node_labels_s)
             .expect("Unable to write node ids' to file");
 
         Ok(())
     }
+
+    /// Write the class labels for graph
+    fn write_graph_labels(&self, data_dir: &Path) -> Result<(), CfgDataSetError> {
+        let graph_labels: Vec<String> = self.cfg_data
+            .iter()
+            .map(|c| c.label.to_string() )
+            .collect();
+
+        let graph_labels_file = data_dir.join("CFG_graph_labels.txt");
+        let graph_labels_s = graph_labels.join("\n");
+        let _ = std::fs::write(graph_labels_file, graph_labels_s)
+            .map_err(|e|  CfgDataSetError::new(e.to_string()));
+
+        Ok(())
+    }
+
+    /// n - total no of nodes
+    /// m - total no of edges
+    /// write:
+    /// - node labels (CFG_node_labels.txt)
+    /// - graph labels (CFG_graph_labels.txt)
+    /// - node to graph mapping (CFG_graph_indicator.txt)
+    fn persist(&self, data_dir: &Path) -> Result<(), CfgDataSetError> {
+        self.write_node_labels(&data_dir)?;
+        self.write_graph_labels(&data_dir)?;
+
+        Ok(())
+    }
 }
+
 
 pub(crate) fn generate(cfg: &Cfg, ds_dir: &str) -> CfgDataSet {
     let mut cfg_data: Vec<CfgData> = vec![];
