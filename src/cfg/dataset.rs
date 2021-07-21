@@ -107,6 +107,23 @@ impl CfgDataSet {
         Ok(())
     }
 
+    fn write_graph_indicators(&self, data_dir: &Path) -> Result<(), CfgDataSetError> {
+        let mut graph_indicator: Vec<String> = vec![];
+        for (i, cfg) in self.cfg_data.iter().enumerate() {
+            for _ in &cfg.graph.nodes {
+                graph_indicator.push((i+1).to_string());
+            }
+        }
+
+        let graph_indicator_file = data_dir.join("CFG_graph_indicator.txt");
+        let graphs_indicator_s = graph_indicator.join("\n");
+        let _ = std::fs::write(graph_indicator_file, graphs_indicator_s)
+            .map_err(|e|  CfgDataSetError::new(e.to_string()));
+
+        Ok(())
+
+    }
+
     /// n - total no of nodes
     /// m - total no of edges
     /// write:
@@ -116,6 +133,7 @@ impl CfgDataSet {
     fn persist(&self, data_dir: &Path) -> Result<(), CfgDataSetError> {
         self.write_node_labels(&data_dir)?;
         self.write_graph_labels(&data_dir)?;
+        self.write_graph_indicators(&data_dir)?;
 
         Ok(())
     }
