@@ -49,13 +49,15 @@ impl fmt::Display for CfgData {
 pub(crate) struct CfgDataSet {
     pub(crate) cfg_data: Vec<CfgData>,
     pub(crate) node_ids_map: HashMap<String, usize>,
+    pub(crate) edge_ids_map: HashMap<String, usize>,
 }
 
 impl CfgDataSet {
     pub(crate) fn new(cfg_data: Vec<CfgData>) -> Self {
         Self {
             cfg_data,
-            node_ids_map: HashMap::new(),
+            node_ids_map: Default::default(),
+            edge_ids_map: Default::default()
         }
     }
 
@@ -76,6 +78,23 @@ impl CfgDataSet {
         self.node_ids_map = node_ids_map;
     }
 
+    fn build_unique_edges_map(&mut self) {
+        println!("=> building the list of unique edges ...");
+        let mut edge_ids_map: HashMap<String, usize> = HashMap::new();
+        let mut edge_id_counter: usize = 0;
+
+        for cfg in &self.cfg_data {
+            for e in &cfg.graph.edges {
+                let e_s = e.edge_label();
+                if ! edge_ids_map.contains_key(&e_s) {
+                    edge_ids_map.insert(e_s, edge_id_counter);
+                    edge_id_counter += 1;
+                }
+            }
+        }
+        self.edge_ids_map = edge_ids_map;
+
+    }
 
     /// CFG_node_labels.txt - `i`th line indicates the node label of the `i`th node
     fn write_node_labels(&self, data_dir: &Path) -> Result<(), CfgDataSetError> {
@@ -143,10 +162,15 @@ impl CfgDataSet {
         for cfg in &self.cfg_data {
             println!("\n=> total: {}", cfg.graph.edges.len());
             for e in &cfg.graph.edges {
-                edge_labels.push(e.edge_label());
+                let edge_label_code = self.edge_ids_map.get(&e.edge_label())
+                    .ok_or_else(|| CfgDataSetError::new(
+                        format!("Unable to retrieve code for edge: {}", e)
+                    ))?;
+                // edge_labels.push(format!("{}, {}", e.edge_label(), edge_label_code.to_string()));
+                edge_labels.push(edge_label_code.to_string());
                 let src_node = e.source_node_id() + n_i;
                 let tgt_node = e.target_node_id() + n_i;
-                println!("[{} -> {}] - {}", src_node, tgt_node, e);
+                // println!("[{} -> {}] - {}", src_node, tgt_node, e);
                 edges.push(format!("{}, {}" , src_node, tgt_node));
             }
             n_i += cfg.graph.nodes.len();
@@ -186,7 +210,7 @@ pub(crate) fn generate(cfg: &Cfg) -> Vec<Cfg> {
     cfg_mut.instantiate();
 
     let cnt = cfg_mut.mut_cnt() * (cfg_mut.terms.len() - 1);
-    let cfgs = mutate::run(&mut cfg_mut, 3)
+    let cfgs = mutate::run(&mut cfg_mut, cnt)
         .expect("Unable to generate a mutated cfg");
     println!("\n=> generated {} cfgs, creating dataset ...", cfgs.len());
 
@@ -211,6 +235,8 @@ fn build_dataset(cfgs: &Vec<Cfg>, data_dir: &Path) -> Result<(), CfgDataSetError
 
     let mut ds = CfgDataSet::new(cfg_data);
     ds.build_unique_nodes_map();
+    ds.build_unique_edges_map();
+    println!("unique edges: {:?}", ds.edge_ids_map);
     ds.persist(&data_dir)?;
 
     Ok(())
