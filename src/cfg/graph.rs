@@ -141,6 +141,18 @@ impl Edge {
         }
     }
 
+    pub(crate) fn edge_label(&self) -> String {
+        self.derived.to_string()
+    }
+
+    pub(crate) fn source_node_id(&self) -> usize {
+        self.source.node_id
+    }
+
+    pub(crate) fn target_node_id(&self) -> usize {
+        self.target.node_id
+    }
+
     pub(crate) fn derive(source: Rc<Node>, target: Rc<Node>) -> Self {
         Self {
             source,
@@ -164,7 +176,7 @@ impl fmt::Display for Edge {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let s = match self.edge_type {
             EdgeType::Derive => {
-                format!("{} --> {}", self.source, self.target)
+                format!("{} ->> {}", self.source, self.target)
             }
             EdgeType::Shift => {
                 format!("{} --<{}>--> {}", self.source, self.derived, self.target)
@@ -415,7 +427,7 @@ pub(crate) struct CfgGraph {
 }
 
 impl CfgGraph {
-    fn new(cfg: Cfg) -> Self {
+    pub(crate) fn new(cfg: Cfg) -> Self {
         Self {
             cfg,
             nodes: Vec::<Rc<Node>>::new(),

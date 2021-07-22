@@ -1,5 +1,5 @@
 use crate::cfg::{Cfg, mutate};
-use crate::cfg::graph::{graph, GraphResult};
+use crate::cfg::graph::{GraphResult, CfgGraph};
 use std::path::Path;
 use std::fmt;
 use std::collections::HashMap;
@@ -19,8 +19,8 @@ impl CfgDataSetError {
 
 /// Represents the ML data associated with a Cfg Graph
 pub(crate) struct CfgData {
-    /// grammar
-    cfg: Cfg,
+    /// grammar file index
+    cfg_id: usize,
     /// Graph associated with the grammar
     graph: GraphResult,
     /// label: 0 indicates grammar is unambiguous; 1 is ambiguous
@@ -28,27 +28,20 @@ pub(crate) struct CfgData {
 }
 
 impl CfgData {
-    pub(crate) fn new(cfg: Cfg, graph: GraphResult) -> Self {
+    pub(crate) fn new(cfg_id: usize, graph: GraphResult) -> Self {
         Self {
-            cfg,
+            cfg_id,
             graph,
             label: 0
         }
     }
 }
 
-impl PartialEq for CfgData {
-    fn eq(&self, other: &Self) -> bool {
-        if self.cfg.eq(&other.cfg) {
-            return true;
-        }
-        false
-    }
-}
-
 impl fmt::Display for CfgData {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        let s = format!("graph: {}, label: {}", self.graph, self.label);
+        let s = format!(
+            "[{}] graph: {}, label: {}", self.cfg_id, self.graph, self.label
+        );
         write!(f, "{}", s)
     }
 }
@@ -59,19 +52,37 @@ pub(crate) struct CfgDataSet {
 }
 
 impl CfgDataSet {
-    pub(crate) fn new(cfg_data: Vec<CfgData>, node_ids_map: HashMap<String, usize>) -> Self {
+    pub(crate) fn new(cfg_data: Vec<CfgData>) -> Self {
         Self {
             cfg_data,
-            node_ids_map,
+            node_ids_map: HashMap::new(),
         }
     }
 
+    pub(crate) fn build_unique_nodes_map(&mut self) {
+        println!("=> building the list of unique nodes ...");
+        let mut node_ids_map: HashMap<String, usize> = HashMap::new();
+        let mut node_id_counter: usize = 0;
+
+        for cfg in &self.cfg_data {
+            for node in &cfg.graph.nodes {
+                let node_s = node.min_item_string();
+                if ! node_ids_map.contains_key(&node_s) {
+                    node_ids_map.insert(node_s, node_id_counter);
+                    node_id_counter += 1;
+                }
+            }
+        }
+        self.node_ids_map = node_ids_map;
+    }
+
+
     /// CFG_node_labels.txt - `i`th line indicates the node label of the `i`th node
     fn write_node_labels(&self, data_dir: &Path) -> Result<(), CfgDataSetError> {
-        println!("total unique nodes: {}", &self.node_ids_map.keys().len());
+        let node_ids_file = data_dir.join("CFG_node_labels.txt");
+        println!("=> writing node labels to {}", node_ids_file.to_str().unwrap());
         let mut node_labels: Vec<String> = vec![];
         for cfg in &self.cfg_data {
-            println!("\n\n==> cfg:\n{}", cfg.cfg);
             for n in &cfg.graph.nodes {
                 let n_label = n.min_item_string();
                 let v = self.node_ids_map.get(&n_label)
@@ -79,12 +90,11 @@ impl CfgDataSet {
                         CfgDataSetError::new(
                             format!("Didn't find node {} in node_ids_map", n))
                     )?;
-                println!("{} -- {}", n, v);
+                // println!("{} -- {}", n, v);
                 node_labels.push(v.to_string());
             }
         }
 
-        let node_ids_file = data_dir.join("CFG_node_labels.txt");
         let node_labels_s = node_labels.join("\n");
         std::fs::write(node_ids_file, node_labels_s)
             .expect("Unable to write node ids' to file");
@@ -94,12 +104,13 @@ impl CfgDataSet {
 
     /// Write the class labels for graph
     fn write_graph_labels(&self, data_dir: &Path) -> Result<(), CfgDataSetError> {
+        let graph_labels_file = data_dir.join("CFG_graph_labels.txt");
+        println!("=> writing graph labels to {}", graph_labels_file.to_str().unwrap());
         let graph_labels: Vec<String> = self.cfg_data
             .iter()
             .map(|c| c.label.to_string() )
             .collect();
 
-        let graph_labels_file = data_dir.join("CFG_graph_labels.txt");
         let graph_labels_s = graph_labels.join("\n");
         let _ = std::fs::write(graph_labels_file, graph_labels_s)
             .map_err(|e|  CfgDataSetError::new(e.to_string()));
@@ -108,6 +119,8 @@ impl CfgDataSet {
     }
 
     fn write_graph_indicators(&self, data_dir: &Path) -> Result<(), CfgDataSetError> {
+        let graph_indicator_file = data_dir.join("CFG_graph_indicator.txt");
+        println!("=> writing graph indicators to {}", graph_indicator_file.to_str().unwrap());
         let mut graph_indicator: Vec<String> = vec![];
         for (i, cfg) in self.cfg_data.iter().enumerate() {
             for _ in &cfg.graph.nodes {
@@ -115,13 +128,41 @@ impl CfgDataSet {
             }
         }
 
-        let graph_indicator_file = data_dir.join("CFG_graph_indicator.txt");
         let graphs_indicator_s = graph_indicator.join("\n");
         let _ = std::fs::write(graph_indicator_file, graphs_indicator_s)
             .map_err(|e|  CfgDataSetError::new(e.to_string()));
 
         Ok(())
+    }
 
+    /// Create `CFG_A.txt` containing the sparse matrix of all edges
+    fn write_edge_labels(&self, data_dir: &Path) -> Result<(), CfgDataSetError> {
+        let mut n_i = 1;
+        let mut edge_labels: Vec<String> = vec![];
+        let mut edges: Vec<String> = vec![];
+        for cfg in &self.cfg_data {
+            println!("\n=> total: {}", cfg.graph.edges.len());
+            for e in &cfg.graph.edges {
+                edge_labels.push(e.edge_label());
+                let src_node = e.source_node_id() + n_i;
+                let tgt_node = e.target_node_id() + n_i;
+                println!("[{} -> {}] - {}", src_node, tgt_node, e);
+                edges.push(format!("{}, {}" , src_node, tgt_node));
+            }
+            n_i += cfg.graph.nodes.len();
+        }
+
+        let edge_labels_file = data_dir.join("CFG_edge_labels.txt");
+        let edge_labels_s = edge_labels.join("\n");
+        let _ = std::fs::write(edge_labels_file, edge_labels_s)
+            .map_err(|e|  CfgDataSetError::new(e.to_string()));
+
+        let edges_file = data_dir.join("CFG_A.txt");
+        let edges_s = edges.join("\n");
+        let _ = std::fs::write(edges_file, edges_s)
+            .map_err(|e|  CfgDataSetError::new(e.to_string()));
+
+        Ok(())
     }
 
     /// n - total no of nodes
@@ -134,67 +175,60 @@ impl CfgDataSet {
         self.write_node_labels(&data_dir)?;
         self.write_graph_labels(&data_dir)?;
         self.write_graph_indicators(&data_dir)?;
+        self.write_edge_labels(&data_dir)?;
 
         Ok(())
     }
 }
 
-
-pub(crate) fn generate(cfg: &Cfg, ds_dir: &str) -> CfgDataSet {
-    let mut cfg_data: Vec<CfgData> = vec![];
+pub(crate) fn generate(cfg: &Cfg) -> Vec<Cfg> {
     let mut cfg_mut = mutate::CfgMutation::new(&cfg);
     cfg_mut.instantiate();
+
     let cnt = cfg_mut.mut_cnt() * (cfg_mut.terms.len() - 1);
-    let cfgs = mutate::run(&mut cfg_mut, cnt)
+    let cfgs = mutate::run(&mut cfg_mut, 3)
         .expect("Unable to generate a mutated cfg");
     println!("\n=> generated {} cfgs, creating dataset ...", cfgs.len());
-    let mut node_ids_map: HashMap<String, usize> = HashMap::new();
 
-    let mut node_id_counter: usize = 0;
-    let ds_path = Path::new(ds_dir);
+    cfgs
+}
+
+fn build_dataset(cfgs: &Vec<Cfg>, data_dir: &Path) -> Result<(), CfgDataSetError> {
+    let mut cfg_data: Vec<CfgData> = vec![];
     for (i, cfg) in cfgs.iter().enumerate() {
-        let cfgp = ds_path.join(i.to_string());
+        let cfgp = data_dir.join(i.to_string());
         std::fs::write(&cfgp, cfg.as_yacc())
-            .expect(&format!("Failed to write cfg {}", cfg));
-        let g = graph(cfgp.to_str().unwrap())
-            .expect("Unable to create graph");
+            .map_err(|e| CfgDataSetError::new(
+                format!("Error occurred whilst writing cfg.\n\nError: {}",
+                        e.to_string())
+            ))?;
+        let g = CfgGraph::new(cfg.clone());
         let g_result = g.instantiate()
             .expect("Unable to convert cfg to graph");
 
-        for node in &g_result.nodes {
-            let node_s = node.min_item_string();
-            if ! node_ids_map.contains_key(&node_s) {
-                node_ids_map.insert(node_s, node_id_counter);
-                node_id_counter += 1;
-            }
-        }
-
-        cfg_data.push(CfgData::new(cfg.clone(), g_result));
+        cfg_data.push(CfgData::new(i, g_result));
     }
 
-    let cfg_ds = CfgDataSet::new(cfg_data, node_ids_map);
+    let mut ds = CfgDataSet::new(cfg_data);
+    ds.build_unique_nodes_map();
+    ds.persist(&data_dir)?;
 
-    cfg_ds
+    Ok(())
 }
 
 #[cfg(test)]
 mod tests {
     use crate::cfg::parse;
-    use crate::cfg::dataset::generate;
+    use crate::cfg::dataset::{generate, build_dataset};
     use std::path::Path;
 
     #[test]
     fn test_ds_generate() {
         let cfg = parse::parse("./grammars/lr1.y")
             .expect("Unable to parse as a cfg");
-        let ds = generate(&cfg, "/var/tmp/cfg_ds");
-        // for cfgd in &ds.cfg_data {
-        //     println!("=> graph: {}, label: {}", cfgd.graph, cfgd.label);
-        // }
-
+        let cfgs = generate(&cfg);
         let data_dir = Path::new("/var/tmp/cfg_ds");
-        ds.persist(data_dir)
-            .expect("Unable to persist dataset");
-
+        build_dataset(&cfgs, &data_dir)
+            .expect("Unable to build dataset from cfgs");
     }
 }
