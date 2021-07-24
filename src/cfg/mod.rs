@@ -1,11 +1,11 @@
 use std::fmt;
 use std::convert::TryFrom;
 
-mod diagram;
-mod parse;
-mod graph;
-mod mutate;
-mod dataset;
+pub(crate) mod diagram;
+pub(crate) mod parse;
+pub(crate) mod graph;
+pub(crate) mod mutate;
+pub(crate) mod dataset;
 
 #[derive(Debug, Copy, Clone, PartialEq)]
 pub(crate) enum SymType {
