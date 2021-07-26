@@ -81,7 +81,7 @@ impl fmt::Display for TransitionEdge {
 
 /// Represents a CFG graph
 #[derive(Debug)]
-pub(crate) struct TransitionGraph {
+pub struct TransitionGraph {
     cfg: Cfg,
     nodes: Vec<Rc<TransitionNode>>,
     edges: Vec<TransitionEdge>,

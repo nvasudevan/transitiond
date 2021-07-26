@@ -3,9 +3,6 @@ use std::convert::TryFrom;
 
 pub(crate) mod diagram;
 pub(crate) mod parse;
-pub(crate) mod graph;
-pub(crate) mod mutate;
-pub(crate) mod dataset;
 
 #[derive(Debug, Copy, Clone, PartialEq)]
 pub(crate) enum SymType {
@@ -132,17 +129,6 @@ impl fmt::Display for LexSymbol {
     }
 }
 
-impl LexSymbol {
-    fn to_term(&self) -> Option<&TermSymbol> {
-        match self {
-            LexSymbol::Term(t) => {
-                Some(t)
-            },
-            _ => { None }
-        }
-    }
-}
-
 impl TryFrom<LexSymbol> for TermSymbol {
     type Error = ();
 
@@ -263,54 +249,6 @@ impl Cfg {
         Self {
             rules
         }
-    }
-
-    pub(crate) fn as_yacc(&self) -> String {
-        let start_rule = self.get_rule("root")
-            .expect("No start rule found!");
-        let mut s = format!("%define lr.type canonical-lr\n%start {}\n%%",
-                            start_rule.lhs);
-        s = format!("{}\n{}", s, self);
-
-        format!("{}\n\n%%\n", s)
-    }
-
-    pub(crate) fn terminals(&self) -> Vec<&TermSymbol> {
-        let mut terms: Vec<&TermSymbol> = vec![];
-        for rule in &self.rules {
-            for alt in &rule.rhs {
-                for sym in &alt.lex_symbols {
-                    if let LexSymbol::Term(t) = sym {
-                        if ! terms.contains(&t) {
-                            terms.push(t);
-                        }
-                    }
-                }
-            }
-        }
-
-        terms
-    }
-
-    pub(crate) fn get_rule(&self, name: &str) -> Option<&CfgRule> {
-        for r in &self.rules {
-            if r.lhs.eq(name) {
-                return Some(r);
-            }
-        }
-
-        None
-    }
-
-    pub(crate) fn get_alt_mut(&mut self, name: &str, alt_index: usize) -> Option<&mut RuleAlt> {
-        for r in &mut self.rules {
-            if r.lhs.eq(name) {
-                let alt = &mut r.rhs[alt_index];
-                return Some(alt);
-            }
-        }
-
-        None
     }
 
     pub(crate) fn terminals_only_alts(&self) -> Vec<(&str, &RuleAlt)> {
